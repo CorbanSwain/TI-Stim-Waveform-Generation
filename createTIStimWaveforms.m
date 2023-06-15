@@ -191,9 +191,11 @@ end
 %% Computed Values
 % cyclePeriod = 1 / pulseFreq;
 % pulseT = cyclePeriod * dutyCycle;
+sampPeriod = 1 / sampRate;
 breakT = cyclePeriod - pulseT;
 pulseCFDelta = (1 / pulseT);
 noBreak = dutyCycle == 1;
+numSignals = 2;
 
 if noBreak
     stimTimeSteps = duration;
@@ -222,7 +224,7 @@ else
 end
 
 %% Define Frequence Modulation Steps
-stimFreqSteps = repmat(refFreqSteps, [2, 1]);  
+stimFreqSteps = repmat(refFreqSteps, [numSignals, 1]);  
 switch symetry
     case ModulationSymetry.SIGNAL1
         stimFreqSteps(1, pulseSel) = ...
@@ -246,11 +248,97 @@ switch symetry
         % phase. It's phase will be determind based on continuity.
         stimPOSteps = [repelem(NaN, numSteps); basePOSteps];
     case ModulationSymetry.SYMETRIC
-        stimPOSteps = [basePOSteps; -basePOSteps] / 2;
+        poDelta = wrapToPi(pulsePO - breakPO);
+        halfPODelta = (poDelta / 2);
+        symetricPOStepCycle1 = [
+            (     breakPO / 2) + [0,      halfPODelta], ...
+            (-1 * breakPO / 2) + [0,      halfPODelta]];
+        symetricPOStepCycle2 = [
+            (-1 * breakPO / 2) + [0, -1 * halfPODelta], ...
+            (     breakPO / 2) + [0, -1 * halfPODelta]];
+        stimPOStepsLong = [
+            repmat(symetricPOStepCycle1, [1, ceil(numPulses / 2) + 1]);
+            repmat(symetricPOStepCycle2, [1, ceil(numPulses / 2) + 1])];
+        stimPOSteps = stimPOStepsLong(:, 1:numSteps);
+            
 end
 
-%% Generate Reference Phase Function
+%% Generate Phase Functions
 refPhaseFcn = generateFMPhaseFcn(stimTimeSteps, refFreqSteps, modT, ...
     fmArgs{:});
+
+phaseFcns = cell(1, numSignals);
+for iSignal = 1:numSignals
+    if symetry == ModulationSymetry.SIGNAL1 && iSignal == 2
+        phaseFcns{iSignal} = refPhaseFcn;
+        continue
+    elseif symetry == ModulationSymetry.SIGNAL2 && iSignal == 1
+        phaseFcns{iSignal} = refPhaseFcn;
+        continue
+    end
+
+    phaseFcns{iSignal} = generateFMPhaseFcn(...
+        stimTimeSteps, ...
+        stimFreqSteps(iSignal, :), ...
+        modT, ...
+        'PhaseOffsetSteps', stimPOSteps(iSignal, :), ...
+        'RefPhaseFcn', refPhaseFcn, ...
+        fmArgs{:});
 end
+
+%% Handle Ramping and Waiting
+rampWaitTimes = [rampT, duration - rampT, duration];
+rampWaitFcns = {
+    @(t) t / rampT
+    @(~) 1
+    @(t) -1 * (t - duration) / rampT};
+ampFcn = composePiecewiseFcn(rampWaitFcns, rampWaitTimes);
+
+%% Generate Waveforms
+timeArray = colon(-waitT, sampPeriod, duration + waitT)';
+numSamples = length(timeArray);
+stimSelection = (timeArray > 0) & (timeArray < duration);
+stimTimeArray = timeArray(stimSelection);
+waveforms = zeros(numSamples, numSignals);
+if doDebug
+    phaseforms = zeros(sum(stimSelection), numSignals);
+end
+for iSignal = 1:numSignals
+    signalFcn = @(t) sin(phaseFcns{iSignal}(t)) .* ampFcn(t);
+    waveforms(stimSelection, iSignal) = signalFcn(stimTimeArray); 
+
+    if doDebug
+        phaseforms(:, iSignal) = phaseFcns{iSignal}(stimTimeArray);
+    end
+end
+
+if doPlot
+    if doDebug
+        figure()
+        plot(stimTimeArray, rad2deg(wrapToPi(diff(phaseforms, 1, 2))), ...
+            '.', 'MarkerSize', 10);
+        ylabel('Phase Offset (deg)');
+        xlabel('Time (s)');
+        ylim([-180, 180]);
+        xlim([0, duration]);
+    end        
+
+
+    figure()
+    ax1 = subplot(3, 1, 1);
+    plot(timeArray, waveforms(:, 1), 'k.-', 'MarkerSize', 10);
+    ylabel('S1')
+    ax2 = subplot(3, 1, 2);
+    plot(timeArray, waveforms(:, 2), 'k.-', 'MarkerSize', 10);
+    ylabel('S2')
+    ax3 = subplot(3, 1, 3);
+    plot(timeArray, sum(waveforms, 2), 'r.-', 'MarkerSize', 10);
+    ylabel('S1 + S2');
+    xlabel('Time (s)')
+    linkaxes([ax1, ax2, ax3], 'x');
+    xlim([-waitT, duration + waitT]);
+end
+
+end
+
 

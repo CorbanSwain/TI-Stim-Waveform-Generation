@@ -31,10 +31,16 @@ function phaseFcn = generateFMPhaseFcn(timeSteps, freqSteps, ...
 %   generateFMPhaseFcn(__, 'FMScale', fmScale) The frequency modulations
 %   will be perfomed with either a ramp in frequency-space or a ramp in
 %   log(frequency) space. Valid values for fmScale are:
-%      - 'log' (default) : ramp in log(frequency) space
-%      - 'lin'           : ramp in frequency space
-%   
+%      - 'logf'        : ramp in log(frequency) space
+%      - 'f' (default) : ramp in frequency space
+%
 %   If fmScale is 'log' than all values for freqSteps must be > 0. 
+%
+%   generateFMPhaseFcn(__, 'FMShape', fmShape) The frequency modulations
+%   will be perfomed with a smooth ramp having either a sinusoidal or a 
+%   linear shape. Valid values for fmShape are:
+%      - 'sin' (default) : sinusoidal ramp in fmScale space
+%      - 'lin'           : inear ramp in fmScale space
 %  
 %   generateFMPhaseFcn(__, 'PhaseOffsetSteps', poSteps, 'RefPhaseFcn',
 %   refPhaseFcn) If specified, the phase will also be modulated during each
@@ -66,11 +72,11 @@ function phaseFcn = generateFMPhaseFcn(timeSteps, freqSteps, ...
 %      2. Beginning at t=tm(1) the function will modulate to
 %         fq(2) and po(2). modTime(1) seconds will be taken to perform 
 %         the modulation (i.e. the modulation occurs over the interval 
-%         [t(1), t(1) + modTime(1)].
+%         [t(1), t(1) + modTime(1)]).
 %      3. Likewise, beginning at t=tm(i) the function will modulate to 
-%         fq(i + 1) and po(i + 1).
+%         fq(i + 1) and po(i + 1) over modTime(i).
 %      4. At t=tm(n-1) the function makes its final modulation to fq(n) and
-%         po(n).
+%         po(n) over modTime(n - 1).
 %      5. Finally, at t=tm(n) the function ends and is no longer defined 
 %         for greater time inputs.
 %   Where:
@@ -89,7 +95,8 @@ p = inputParser();
 p.addRequired('timeSteps', @(x) isnumeric(x) && isvector(x));
 p.addRequired('freqSteps', @(x) isnumeric(x) && isvector(x));
 p.addRequired('modulationTime', @(x) isnumeric(x) && isvector(x));
-p.addParameter('FMScale', 'log', @(x) any(strcmpi(x, {'log', 'lin'})));
+p.addParameter('FMScale', 'f', @(x) any(strcmpi(x, {'logf', 'f'})));
+p.addParameter('FMShape', 'sin', @(x) any(strcmpi(x, {'lin', 'sin'})));
 p.addParameter('RefPhaseFcn', [], @(x) isa(x, 'function_handle'));
 p.addParameter('PhaseOffsetSteps', [], @(x) isnumeric(x) && isvector(x));
 p.addParameter('Sigmoid', 'erf', ...
@@ -99,6 +106,7 @@ p.addParameter('Debug', false, @(x) isscalar(x) && islogical(x));
 p.parse(timeSteps, freqSteps, modulationTime, varargin{:});
 
 fmScale = p.Results.FMScale;
+fmShape = p.Results.FMShape;
 refPhaseFcn = p.Results.RefPhaseFcn;
 poSteps = wrapToPi(p.Results.PhaseOffsetSteps);
 hasPO = ~isempty(poSteps);
@@ -179,22 +187,46 @@ for iMod = 1:numMods
 end
 nUnqFreqMods = size(unqFreqModsWithTime, 1);
 
-switch lower(fmScale)
-    case 'log'
-        % function returning phase as a function of time for performing a
-        % linear ramp in *LOG(frequency)* space from frequency f1 Hz to f2
-        % Hz between time t1 s and t2 s
-        baseFMPhaseFcn = @(t, t1, t2, f1, f2) ...
-            (f1 * pi * ((f1 / f2) .^ ((t - t1) / (t1 - t2))) ...
-             * (t1 - t2) * 2) / log(f1 / f2);
-
+switch lower(fmShape)
     case 'lin'
-        % function returning phase as a function of time for performing a
-        % *linear* ramp from frequency f1 Hz to f2 Hz between time t1 s and
-        % t2 s
-        baseFMPhaseFcn = @(t, t1, t2, f1, f2) ...
-            2 * pi * (f1 * t + ((f2 - f1) * ((t - t1) .^ 2) ...
-            / (2 * (t2 - t1))));
+        doSinFM = false;
+    case 'sin'
+        doSinFM = true;
+    otherwise
+        error('Unexpected value for fmShape encountered, ''%s''', ...
+            fmShape)
+end
+
+switch lower(fmScale)
+    case 'logf'
+        if doSinFM
+            baseFMPhaseFcn = @logfSinFMPhaseRamp;
+        else
+            % function returning phase as a function of time for performing
+            % a LINEAR ramp in LOG(frequency) space from frequency f1 Hz to
+            % f2 Hz between time t1 s and t2 s
+            baseFMPhaseFcn = @(t, t1, t2, f1, f2) ...
+                (f1 * pi * ((f1 / f2) .^ ((t - t1) / (t1 - t2))) ...
+                 * (t1 - t2) * 2) / log(f1 / f2);
+        end
+
+    case 'f'
+        if doSinFM
+            % function returning phase as a function of time for performing
+            % a SINUSOIDAL ramp from frequency f1 Hz to f2 Hz between time
+            % t1 s and t2 s
+            baseFMPhaseFcn = @(t, t1, t2, f1, f2) 2 * pi ...
+                * ((t * (f1 + f2) / 2) ...
+                   + (sin((pi * (t - t1)) / (t1 - t2)) ...
+                      * (f1 - f2) * (t1 - t2)) / (2 * pi));
+        else
+            % function returning phase as a function of time for performing
+            % a LINEAR ramp from frequency f1 Hz to f2 Hz between time t1 s
+            % and t2 s
+            baseFMPhaseFcn = @(t, t1, t2, f1, f2) ...
+                2 * pi * (f1 * t + ((f2 - f1) * ((t - t1) .^ 2) ...
+                / (2 * (t2 - t1))));
+        end
 
     otherwise
         error('Unexpected value for fmScale encountered, ''%s''', ...
@@ -261,6 +293,44 @@ end
 
 if doDebug
     figure();
+    if hasPO
+        ax1 = subplot(3, 1, 1);
+    else
+        ax1 = subplot(2, 1, 1);
+    end
+    yticks(0:45:360);
+    ylim([-10, 370]);
+    ylabel('Phase (deg)');
+    xlabel('Time (ms)');
+    hold on
+    grid on
+    box off
+    if hasPO
+        ax2 = subplot(3, 1, 2);
+        yticks(-180:45:180);
+        ylim([-190, 190]);
+        ylabel('Phase Offset (deg)');
+        xlabel('Time (ms)')
+        hold on
+        grid on
+        box off
+    end
+    if hasPO
+        ax3 = subplot(3, 1, 3);
+    else
+        ax3 = subplot(2, 1, 2);
+    end
+    ax3.YScale = 'log';
+    ylabel('Instant. Frequency (Hz)');
+    xlabel('Time (ms)')
+    hold on
+    grid on
+    box off
+    if hasPO
+        linkaxes([ax1, ax2, ax3], 'x');
+    else
+        linkaxes([ax1, ax3], 'x');
+    end
 end
 
 phaseFcnPieces = cell(1, numPieces);
@@ -341,47 +411,52 @@ for iPiece = 1:numPieces
     end
 
     % debug plots
-    if hasPO
-        subplot(2, 1, 1);
-    end
+
     if abs(startTime - endTime) < eps(startTime)
         % e.g. for modTime == 0
         testT = startTime;
         plotArgs = {'o', 'LineWidth', 3, 'MarkerSize', 10};
     else
-        testT = linspace(startTime, endTime, 1000);
+        testT = linspace(startTime, endTime, 500);
         plotArgs = {'.', 'LineWidth', 3, 'MarkerSize', 10};
     end
     testPhi = piecePhaseFnc(testT);
-    plot(testT * 1e3, ...
-        rad2deg(testPhi), ...
-        plotArgs{:}, ...
-        'DisplayName', sprintf('Piece %2d', iPiece));
-    yticks(0:45:360);
-    ylim([-10, 370]);
-    ylabel('Phase (deg)');
-    xlabel('Time (ms)');
-    hold on
-    grid on
-    box off
-
+    p = plot(ax1, testT * 1e3, rad2deg(testPhi), ...
+        plotArgs{:}, 'DisplayName', sprintf('Piece %2d', iPiece));
+    xlim(ax1, 'auto')
     if hasPO
-        subplot(2, 1, 2);
-        plot(testT * 1e3, ...
+        plot(ax2, testT * 1e3, ...
             rad2deg(wrapToPi(testPhi - refPhaseFcn(testT))), ...
-            plotArgs{:})
-        yticks(-180:45:180);
-        ylim([-190, 190]);
-        ylabel('Phase Offset (deg)');
-        xlabel('Time (ms)')
-        hold on
-        grid on
-        box off
+            plotArgs{:}, 'Color', p.Color)
+        xlim(ax2, 'auto')
     end
+    instFreq = diff(unwrap(testPhi)) ./ diff(testT) / 2/ pi;
+    plot(ax3, testT(2:end) * 1e3, instFreq, plotArgs{:}, 'Color', p.Color); 
+    xlim(ax3, 'auto')
+    ylim(ax3, 'auto')
 end
 
 % ensure that the function will return NaN for value < 0
 composeFcnPieces = [{@(t) NaN}, phaseFcnPieces];
 composeKeytimes = [(0 - eps(0)), pieceEndTimes];
 phaseFcn = composePiecewiseFcn(composeFcnPieces, composeKeytimes);
+end
+
+function phi = logfSinFMPhaseRamp(t, t1, t2, f1, f2)
+% function defining a sinusoidal ramp from f1 to f2 in log(f)-space
+freqFcn = @(delt) f1 ...
+    * exp((log(f2) - log(f1)) ...
+    * ((sin((2 * pi * delt / 2 / (t2 - t1)) ...
+    - (pi / 2)) / 2) + (1 / 2)));
+
+% the following lines perform an integral of (2 * pi * freqFcn) from t1 to
+% t for all values in the vector t
+
+% rescale integral to be from zero to one
+tDelta = t(:) - t1;
+reScaledFcn = @(tt, ~) freqFcn(tt * tDelta) .* tDelta;
+
+% perform integration with ode45 solver
+[~, result] = ode45(reScaledFcn, [0, 0.5, 1], zeros(size(t)));
+phi = 2 * pi * result(end, :)';
 end
