@@ -8,7 +8,7 @@ p.addRequired('xStart', @(x) isnumeric(x) && isscalar(x));
 p.addRequired('xEnd', @(x) isnumeric(x) && isscalar(x));
 p.addRequired('yStart', @(x) isnumeric(x) && isscalar(x));
 p.addRequired('yEnd', @(x) isnumeric(x) && isscalar(x));
-p.addOptional('NumSigmas', 2, @(x) isnumeric(x) && (x > 0));
+p.addParameter('NumSigmas', 2, @(x) isnumeric(x) && (x > 0));
 p.parse(x, xStart, xEnd, yStart, yEnd, varargin{:})
 numSigmas = p.Results.NumSigmas;
 
