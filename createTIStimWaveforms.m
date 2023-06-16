@@ -104,11 +104,13 @@ isNumericScalar = @(x) isnumeric(x) && isscalar(x);
 isPositiveScalar = @(x) isNumericScalar(x) && (x > 0);
 isNonNegativeScalar = @(x) isNumericScalar(x) && (x >= 0);
 isLogicalScalar = @(x) islogical(x) && isscalar(x);
+isNonNegativeVecWithLen = @(x, lengths) isnumeric(x) && (all(x >=0)) ...
+    && isvector(x) && any(length(x) == lengths, 'all');
 
 p = inputParser();
-p.addRequired('duration', isNonNegativeScalar);
-p.addRequired('carrierFreq', isPositiveScalar);
-p.addRequired('pulseFreq', isPositiveScalar);
+p.addRequired('Duration', isNonNegativeScalar);
+p.addRequired('CarrierFreq', isPositiveScalar);
+p.addRequired('PulseFreq', isPositiveScalar);
 p.addParameter('SamplingRate', 100e3, isPositiveScalar);
 p.addParameter('DutyCycle', 1, @(x) isNonNegativeScalar(x) && (x <= 1));
 p.addParameter('A1', 1, isNonNegativeScalar);
@@ -119,20 +121,26 @@ p.addParameter('BreakCarrierFreq', [], ...
 p.addParameter('FMTime', [], ...
     @(x) (csmu.scalarStringLike(x) && isequal(lower(char(x)), 'auto')) ...
     || isNonNegativeScalar(x) || isempty(x));
-p.addParameter('FMArgs', {}, @(x) iscell(x) && isvector(x));
+p.addParameter('FMArgs', {}, ...
+    @(x) iscell(x) && (isvector(x) || isempty(x)));
 p.addParameter('ModulationSymetry', 'signal1', ...
     @ModulationSymetry.isMember);
-p.addParameter('RampTime', 0.5, isNonNegativeScalar);
-p.addParameter('WaitTime', 0.1, isNonNegativeScalar);
+p.addParameter('RampTime', 0.5, @(x) isNonNegativeVecWithLen(x, [1, 2]));
+p.addParameter('WaitTime', 0.1, @(x) isNonNegativeVecWithLen(x, [1, 2]));
 p.addParameter('Control', false, isLogicalScalar);
 p.addParameter('Plot', true, isLogicalScalar);
 p.addParameter('Debug', false, isLogicalScalar);
 
 if nargin() == 1
-    p.parse(duration);
-else
-    p.parse(duration, carrierFreq, pulseFreq, varargin{:});
+    inputStruct = duration;
+    p.KeepUnmatched = true;   
+    duration = inputStruct.Duration;
+    carrierFreq = inputStruct.CarrierFreq;
+    pulseFreq = inputStruct.PulseFreq;
+    varargin = {inputStruct};
 end
+
+p.parse(duration, carrierFreq, pulseFreq, varargin{:});
 
 nargoutchk(0, 3);
 
@@ -146,8 +154,13 @@ breakCFreq = inputs.BreakCarrierFreq;
 modT = inputs.FMTime;
 fmArgs = inputs.FMArgs;
 symetry = ModulationSymetry(inputs.ModulationSymetry);
+
 rampT = inputs.RampTime(:)' .* [1, 1];
-waitT = inputs.WaitTime;
+parameters.RampTime = rampT;
+
+waitT = inputs.WaitTime(:)' .* [1, 1];
+parameters.WaitTime = waitT;
+
 doControl = inputs.Control;
 doPlot = inputs.Plot;
 doDebug = inputs.Debug;
@@ -200,6 +213,16 @@ if modT > (pulseT / 2)
         ' period (pulsePeriod/2=%f s); clipping the modulation time', ...
         ' to this max value.'], pulseT/2);
     modT = pulseT / 2;
+    parameters.FMTime = modT;
+end
+
+totalRampTime = sum(rampT);
+if totalRampTime > duration
+    warning(['The total ramp time (sum(rampT(:)'' .* [1, 1])) cannot', ... 
+        ' be greater than the stimulus duration. Scalling total ramp', ...
+        ' time to equal the stimulus duration (%f s).'], duration)
+    rampT = (rampT / totalRampTime) * duration;
+    parameters.RampTime = rampT;
 end
 
 %% Computed Values
@@ -224,7 +247,7 @@ else
     stimTimeStepsHelper = [0, ...
         repmat([pulseT - modT, cyclePeriod], [1, numPulses])];
 
-    stimTimeSteps = breakT ...
+    stimTimeSteps = (breakT / 2) ...
         + (stimTimeStepsHelper + (cycleNumsHelper .* cyclePeriod));
     stimTimeSteps = stimTimeSteps(1:(end - 1));
     % cycleNums = repelem(1:numPulses, 2);    
@@ -233,8 +256,22 @@ else
     pulseSel = 2:2:numSteps;
 
     if ~doControl
+        % during the break the signals must be perfectly out of phase;
+        % that is 180 deg or pi rad of phase offset.
         breakPO = pi;
-        pulsePO = wrapToPi((pulseCFDelta * 2 * pi * modT) + pi);
+        
+        % pulsePODelta is chosen such that at the end of the frequency
+        % modulation the modulated signal will be at the phase offset
+        % location corresponding to where the phase offset would be for a
+        % pulse beginning at pi phase offset with no frequency modulation
+        % (i.e. an abrupt frequency and phase step). This allows the "duty
+        % cycle" modified pulse to mimic a non duty cycle modified pulse
+        % (given the same pulse-carrierFrequency difference, which--as an
+        % aside--is not the same as having the same pulse frequency).
+        pulsePODelta = wrapToPi(pulseCFDelta * 2 * pi * modT);
+        
+        pulsePO = wrapToPi(pulsePODelta + breakPO);
+
         basePOSteps = repmat([breakPO, pulsePO], [1, numPulses]);
     end
 end
@@ -268,8 +305,7 @@ if ~doControl
             if noBreak
                 stimPOSteps = [basePOSteps; -basePOSteps] / 2;
             else
-                poDelta = wrapToPi(pulsePO - breakPO);
-                halfPODelta = (poDelta / 2);
+                halfPODelta = (pulsePODelta / 2);
                 symetricPOStepCycle1 = [
                     (     breakPO / 2) + [0,      halfPODelta], ...
                     (-1 * breakPO / 2) + [0,      halfPODelta]];
@@ -321,7 +357,7 @@ rampWaitFcns = {
 ampFcn = composePiecewiseFcn(rampWaitFcns, rampWaitTimes);
 
 %% Generate Waveforms
-timeArray = colon(-waitT, sampPeriod, duration + waitT)';
+timeArray = colon(-waitT(1), sampPeriod, duration + waitT(2))';
 numSamples = length(timeArray);
 stimSelection = (timeArray > 0) & (timeArray < duration);
 stimTimeArray = timeArray(stimSelection);
@@ -371,32 +407,32 @@ if doPlot
     t.Padding = 'compact';
 
     ax1 = nexttile();
-    title('Signal 1')
+    title('Signal 1, S1')
     hold(ax1, 'on');
     plot(timeArray, waveforms(:, 1), plotArgs{:}, 'Color', s1Color);
-    ylabel('S1 Amplitude (a.u.)');
+    ylabel('Amplitude (a.u.)');
     ylim([-1, 1] * amp1 * 1.1);
-    xlim([-waitT, duration + waitT]);
+    xlim([-waitT(1), duration + waitT(2)]);
     box('off');
     grid('on');
 
     ax2 = nexttile();
-    title('Signal 2');
+    title('Signal 2, S2');
     hold(ax2, 'on');
     plot(timeArray, waveforms(:, 2), plotArgs{:}, 'Color', s2Color);
-    ylabel('S2 Amplitude (a.u.)');
+    ylabel('Amplitude (a.u.)');
     ylim([-1, 1] * amp2 * 1.1);
-    xlim([-waitT, duration + waitT]);
+    xlim([-waitT(1), duration + waitT(2)]);
     box('off');
     grid('on');
 
     ax3 = nexttile();
-    title('Summed Signal');
+    title('Summed Signal, S1 + S2');
     hold(ax3, 'on');
     plot(timeArray, sum(waveforms, 2), plotArgs{:}, 'Color', sumColor);
-    ylabel('S1 + S2 Amplitude (a.u.)');
+    ylabel('Amplitude (a.u.)');
     ylim([-1, 1] * (amp1 + amp2) * 1.1);
-    xlim([-waitT, duration + waitT]);
+    xlim([-waitT(1), duration + waitT(2)]);
     box('off');
     grid('on');
 
@@ -413,8 +449,8 @@ if doPlot
     ylabel('Instant Freq (Hz)');
     xlabel('Time (s)');    
     legend(ax4);    
-    xlim([-waitT, duration + waitT]); 
-    ylim([minF * 0.99, maxF * 1.01])
+    xlim([-waitT(1), duration + waitT(2)]); 
+    ylim('padded')
     ax4.YScale = 'log';
     box('off');
     grid('on');
@@ -437,9 +473,9 @@ if doPlot
             joinStr = ', ';
         end
         str = [str, joinStr, sprintf('%s=%s', paramName, ...
-            char(string(val)))];
+            csmu.toStr(val))];
     end
-    str = sprintf('%s - (Generated on %s, Version %s)', str, ...
+    str = sprintf('%s (Generated on %s, Version %s)', str, ...
         datestr(now()), VERSION);
     curPos = f.Position;
     newW = curPos(3) * 1.2;
@@ -449,8 +485,7 @@ if doPlot
     annotation('textbox', ax5.Position, 'String', str, 'LineStyle', ...
         'none', 'FontName', 'FixedWidth', 'VerticalAlignment', 'middle');
 
-    linkaxes([ax1, ax2, ax3, ax4], 'x');   
-    
+    linkaxes([ax1, ax2, ax3, ax4], 'x');       
 end
 
 %% Format Outputs

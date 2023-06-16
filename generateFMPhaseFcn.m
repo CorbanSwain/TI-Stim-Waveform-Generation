@@ -92,9 +92,9 @@ function phaseFcn = generateFMPhaseFcn(timeSteps, freqSteps, ...
 
 %% Input Handling
 p = inputParser();
-p.addRequired('timeSteps', @(x) isnumeric(x) && isvector(x));
-p.addRequired('freqSteps', @(x) isnumeric(x) && isvector(x));
-p.addRequired('modulationTime', @(x) isnumeric(x) && isvector(x));
+p.addRequired('TimeSteps', @(x) isnumeric(x) && isvector(x));
+p.addRequired('FreqSteps', @(x) isnumeric(x) && isvector(x));
+p.addRequired('ModulationTime', @(x) isnumeric(x) && isvector(x));
 p.addParameter('FMScale', 'f', @(x) any(strcmpi(x, {'logf', 'f'})));
 p.addParameter('FMShape', 'sin', @(x) any(strcmpi(x, {'lin', 'sin'})));
 p.addParameter('RefPhaseFcn', [], @(x) isa(x, 'function_handle'));
