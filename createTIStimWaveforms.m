@@ -7,6 +7,8 @@ function [waveforms, varargout] = createTIStimWaveforms(duration, ...
 %   carrier frequency carrierFreq Hz and interferes to produce a pulse
 %   frequency of pulseFreq Hz.
 %
+%   waveforms will have size = [(duration + 2 * waitT) * sampRate, 2]
+%
 %   createTIStimWaveforms(__, 'SamplingRate', sampRate) {sampRate=100e3}
 %   Defines the sampling rate for the waveforms in Hz.
 %
@@ -80,7 +82,12 @@ function [waveforms, varargout] = createTIStimWaveforms(duration, ...
 %   createTIStimWaveforms(__, 'Debug', doDebug) {doDebug=false} will run
 %   the waveform creation code in debug mode if doDebug is true.
 %
-%   [waveforms, parameters] = createTIStimWaveforms(__) also returns the
+%   [waveforms, T] = createTIStimWaveforms(__) also returns the
+%   time column vector T having the same number of rows as waveforms. The
+%   stimulation begins at time 0s, so if waitT(1) > 0, there will be
+%   negative time points.
+%
+%   [waveforms, T, parameters] = createTIStimWaveforms(__) also returns the
 %   parameters used for running the function as a struct.
 %
 %   createTIStimWaveforms(parameters) will run the creation code using the
@@ -89,6 +96,8 @@ function [waveforms, varargout] = createTIStimWaveforms(duration, ...
 %   See also GENERATEFMPHASEFCN, MODULATIONSYMETRY.
 
 % Corban Swain, June 2023
+
+VERSION = 'v0.1.0';
 
 %% Input Handling
 isNumericScalar = @(x) isnumeric(x) && isscalar(x);
@@ -125,7 +134,10 @@ else
     p.parse(duration, carrierFreq, pulseFreq, varargin{:});
 end
 
+nargoutchk(0, 3);
+
 inputs = p.Results;
+parameters = inputs;
 sampRate = inputs.SamplingRate;
 dutyCycle = inputs.DutyCycle;
 amp1 = inputs.A1;
@@ -134,7 +146,7 @@ breakCFreq = inputs.BreakCarrierFreq;
 modT = inputs.FMTime;
 fmArgs = inputs.FMArgs;
 symetry = ModulationSymetry(inputs.ModulationSymetry);
-rampT = inputs.RampTime;
+rampT = inputs.RampTime(:)' .* [1, 1];
 waitT = inputs.WaitTime;
 doControl = inputs.Control;
 doPlot = inputs.Plot;
@@ -166,6 +178,7 @@ if ~doAutoSet && csmu.scalarStringLike(breakCFreq)
 end
 if doAutoSet
     breakCFreq = carrierFreq;
+    parameters.BreakCarrierFreq = breakCFreq;
 end
 
 doAutoSet = isempty(modT);
@@ -179,6 +192,7 @@ if ~doAutoSet && csmu.scalarStringLike(modT)
 end
 if doAutoSet
     modT = pulseT * 0.2;
+    parameters.FMTime = modT;
 end
 
 if modT > (pulseT / 2)
@@ -213,85 +227,97 @@ else
     stimTimeSteps = breakT ...
         + (stimTimeStepsHelper + (cycleNumsHelper .* cyclePeriod));
     stimTimeSteps = stimTimeSteps(1:(end - 1));
-    cycleNums = repelem(1:numPulses, 2);    
+    % cycleNums = repelem(1:numPulses, 2);    
 
     refFreqSteps = repmat([breakCFreq, carrierFreq], [1, numPulses]);   
     pulseSel = 2:2:numSteps;
 
-    breakPO = pi;
-    pulsePO = wrapToPi((pulseCFDelta * 2 * pi * modT) + pi);
-    basePOSteps = repmat([breakPO, pulsePO], [1, numPulses]);
+    if ~doControl
+        breakPO = pi;
+        pulsePO = wrapToPi((pulseCFDelta * 2 * pi * modT) + pi);
+        basePOSteps = repmat([breakPO, pulsePO], [1, numPulses]);
+    end
 end
 
-%% Define Frequence Modulation Steps
-stimFreqSteps = repmat(refFreqSteps, [numSignals, 1]);  
-switch symetry
-    case ModulationSymetry.SIGNAL1
-        stimFreqSteps(1, pulseSel) = ...
-            stimFreqSteps(1, pulseSel) + pulseCFDelta;
-    case ModulationSymetry.SIGNAL2
-        stimFreqSteps(2, pulseSel) = ...
-            stimFreqSteps(2, pulseSel) + pulseCFDelta;
-    case ModulationSymetry.SYMETRIC
-         stimFreqSteps(:, pulseSel) = ...
-            stimFreqSteps(:, pulseSel) + ([+1; -1] * pulseCFDelta / 2);
-end
+if ~doControl
+    %% Define Frequence Modulation Steps
+    stimFreqSteps = repmat(refFreqSteps, [numSignals, 1]);
+    switch symetry
+        case ModulationSymetry.SIGNAL1
+            stimFreqSteps(1, pulseSel) = ...
+                stimFreqSteps(1, pulseSel) + pulseCFDelta;
+        case ModulationSymetry.SIGNAL2
+            stimFreqSteps(2, pulseSel) = ...
+                stimFreqSteps(2, pulseSel) + pulseCFDelta;
+        case ModulationSymetry.SYMETRIC
+            stimFreqSteps(:, pulseSel) = ...
+                stimFreqSteps(:, pulseSel) + ([+1; -1] * pulseCFDelta / 2);
+    end
 
-%% Define Phase Modulation Steps
-switch symetry
-    case ModulationSymetry.SIGNAL1
-        % NaN phase offset for signal 2 since it will be the reference
-        % phase. It's phase will be determind based on continuity.
-        stimPOSteps = [basePOSteps; repelem(NaN, numSteps)];
-    case ModulationSymetry.SIGNAL2
-        % NaN phase offset for signal 1 since it will be the reference
-        % phase. It's phase will be determind based on continuity.
-        stimPOSteps = [repelem(NaN, numSteps); basePOSteps];
-    case ModulationSymetry.SYMETRIC
-        poDelta = wrapToPi(pulsePO - breakPO);
-        halfPODelta = (poDelta / 2);
-        symetricPOStepCycle1 = [
-            (     breakPO / 2) + [0,      halfPODelta], ...
-            (-1 * breakPO / 2) + [0,      halfPODelta]];
-        symetricPOStepCycle2 = [
-            (-1 * breakPO / 2) + [0, -1 * halfPODelta], ...
-            (     breakPO / 2) + [0, -1 * halfPODelta]];
-        stimPOStepsLong = [
-            repmat(symetricPOStepCycle1, [1, ceil(numPulses / 2) + 1]);
-            repmat(symetricPOStepCycle2, [1, ceil(numPulses / 2) + 1])];
-        stimPOSteps = stimPOStepsLong(:, 1:numSteps);
-            
+    %% Define Phase Modulation Steps
+    switch symetry
+        case ModulationSymetry.SIGNAL1
+            % NaN phase offset for signal 2 since it will be the reference
+            % phase. It's phase will be determind based on continuity.
+            stimPOSteps = [basePOSteps; repelem(NaN, numSteps)];
+        case ModulationSymetry.SIGNAL2
+            % NaN phase offset for signal 1 since it will be the reference
+            % phase. It's phase will be determind based on continuity.
+            stimPOSteps = [repelem(NaN, numSteps); basePOSteps];
+        case ModulationSymetry.SYMETRIC
+            if noBreak
+                stimPOSteps = [basePOSteps; -basePOSteps] / 2;
+            else
+                poDelta = wrapToPi(pulsePO - breakPO);
+                halfPODelta = (poDelta / 2);
+                symetricPOStepCycle1 = [
+                    (     breakPO / 2) + [0,      halfPODelta], ...
+                    (-1 * breakPO / 2) + [0,      halfPODelta]];
+                symetricPOStepCycle2 = [
+                    (-1 * breakPO / 2) + [0, -1 * halfPODelta], ...
+                    (     breakPO / 2) + [0, -1 * halfPODelta]];
+                nReps = ceil(numPulses/2) + 1;
+                stimPOStepsLong = [
+                    repmat(symetricPOStepCycle1, [1, nReps]);
+                    repmat(symetricPOStepCycle2, [1, nReps])];
+                stimPOSteps = stimPOStepsLong(:, 1:numSteps);
+            end
+    end
 end
 
 %% Generate Phase Functions
 refPhaseFcn = generateFMPhaseFcn(stimTimeSteps, refFreqSteps, modT, ...
     fmArgs{:});
 
-phaseFcns = cell(1, numSignals);
-for iSignal = 1:numSignals
-    if symetry == ModulationSymetry.SIGNAL1 && iSignal == 2
-        phaseFcns{iSignal} = refPhaseFcn;
-        continue
-    elseif symetry == ModulationSymetry.SIGNAL2 && iSignal == 1
-        phaseFcns{iSignal} = refPhaseFcn;
-        continue
-    end
+if doControl
+    phaseFcns = {refPhaseFcn, @(t) wrapTo2Pi(refPhaseFcn(t) + pi)};
+else
+    phaseFcns = cell(1, numSignals);
+    for iSignal = 1:numSignals
+        if symetry == ModulationSymetry.SIGNAL1 && iSignal == 2
+            phaseFcns{iSignal} = refPhaseFcn;
+            continue
+        elseif symetry == ModulationSymetry.SIGNAL2 && iSignal == 1
+            phaseFcns{iSignal} = refPhaseFcn;
+            continue
+        end
 
-    phaseFcns{iSignal} = generateFMPhaseFcn(...
-        stimTimeSteps, ...
-        stimFreqSteps(iSignal, :), ...
-        modT, ...
-        'PhaseOffsetSteps', stimPOSteps(iSignal, :), ...
-        'RefPhaseFcn', refPhaseFcn, ...
-        fmArgs{:});
+        phaseFcns{iSignal} = generateFMPhaseFcn(...
+            stimTimeSteps, ...
+            stimFreqSteps(iSignal, :), ...
+            modT, ...
+            'PhaseOffsetSteps', stimPOSteps(iSignal, :), ...
+            'RefPhaseFcn', refPhaseFcn, ...
+            fmArgs{:});
+    end
 end
 
 %% Handle Ramping and Waiting
-rampWaitTimes = [rampT, duration - rampT, duration];
+rampWaitTimes = [rampT(1), duration - rampT(2), duration];
 rampWaitFcns = {
-    @(t) t / rampT
+    @(t) t / rampT(1)
     @(~) 1
-    @(t) -1 * (t - duration) / rampT};
+    @(t) -1 * (t - duration) / rampT(2)};
 ampFcn = composePiecewiseFcn(rampWaitFcns, rampWaitTimes);
 
 %% Generate Waveforms
@@ -299,46 +325,143 @@ timeArray = colon(-waitT, sampPeriod, duration + waitT)';
 numSamples = length(timeArray);
 stimSelection = (timeArray > 0) & (timeArray < duration);
 stimTimeArray = timeArray(stimSelection);
+phaseforms = zeros(sum(stimSelection), numSignals);
 waveforms = zeros(numSamples, numSignals);
-if doDebug
-    phaseforms = zeros(sum(stimSelection), numSignals);
-end
 for iSignal = 1:numSignals
-    signalFcn = @(t) sin(phaseFcns{iSignal}(t)) .* ampFcn(t);
-    waveforms(stimSelection, iSignal) = signalFcn(stimTimeArray); 
-
-    if doDebug
-        phaseforms(:, iSignal) = phaseFcns{iSignal}(stimTimeArray);
-    end
+    phaseforms(:, iSignal) = phaseFcns{iSignal}(stimTimeArray);
+    waveforms(stimSelection, iSignal) = ...
+        sin(phaseforms(:, iSignal)) .* ampFcn(stimTimeArray); 
 end
+waveforms = waveforms .* [amp1, amp2];
 
+%% Display Plots
 if doPlot
     if doDebug
         figure()
         plot(stimTimeArray, rad2deg(wrapToPi(diff(phaseforms, 1, 2))), ...
-            '.', 'MarkerSize', 10);
+            'k.', 'MarkerSize', 10);
         ylabel('Phase Offset (deg)');
         xlabel('Time (s)');
         ylim([-180, 180]);
         xlim([0, duration]);
     end        
+    
+    if doControl
+        freqs = refFreqSteps;
+    else
+        freqs = stimFreqSteps;
+    end
 
+    maxF = max(freqs, [], 'all');
+    minF = min(freqs, [], 'all');
+    phaseTol = maxF * 2 * pi * sampPeriod * 1.05;
+    instantFreq = ...
+        diff(unwrap(phaseforms, (2 * pi) - phaseTol, 1), 1, 1) ...
+        / sampPeriod / 2 / pi;    
 
-    figure()
-    ax1 = subplot(3, 1, 1);
-    plot(timeArray, waveforms(:, 1), 'k.-', 'MarkerSize', 10);
-    ylabel('S1')
-    ax2 = subplot(3, 1, 2);
-    plot(timeArray, waveforms(:, 2), 'k.-', 'MarkerSize', 10);
-    ylabel('S2')
-    ax3 = subplot(3, 1, 3);
-    plot(timeArray, sum(waveforms, 2), 'r.-', 'MarkerSize', 10);
-    ylabel('S1 + S2');
-    xlabel('Time (s)')
-    linkaxes([ax1, ax2, ax3], 'x');
+    s1Color = [228, 26, 28] / 255;
+    s2Color = [55, 126, 184] / 255;
+    sumColor = [77, 175, 74] / 255;    
+
+    f = figure('Name', 'TI Stimulation Summary Plots');    
+    plotArgs = {'-', 'LineWidth', 2};
+    t = tiledlayout('vertical');
+    title(t, 'TI Stimulation Waveforms and Frequency Summary');
+    t.TileSpacing = 'compact';
+    t.Padding = 'compact';
+
+    ax1 = nexttile();
+    title('Signal 1')
+    hold(ax1, 'on');
+    plot(timeArray, waveforms(:, 1), plotArgs{:}, 'Color', s1Color);
+    ylabel('S1 Amplitude (a.u.)');
+    ylim([-1, 1] * amp1 * 1.1);
     xlim([-waitT, duration + waitT]);
+    box('off');
+    grid('on');
+
+    ax2 = nexttile();
+    title('Signal 2');
+    hold(ax2, 'on');
+    plot(timeArray, waveforms(:, 2), plotArgs{:}, 'Color', s2Color);
+    ylabel('S2 Amplitude (a.u.)');
+    ylim([-1, 1] * amp2 * 1.1);
+    xlim([-waitT, duration + waitT]);
+    box('off');
+    grid('on');
+
+    ax3 = nexttile();
+    title('Summed Signal');
+    hold(ax3, 'on');
+    plot(timeArray, sum(waveforms, 2), plotArgs{:}, 'Color', sumColor);
+    ylabel('S1 + S2 Amplitude (a.u.)');
+    ylim([-1, 1] * (amp1 + amp2) * 1.1);
+    xlim([-waitT, duration + waitT]);
+    box('off');
+    grid('on');
+
+    ax4 = nexttile();
+    title('Instantaneous Frequency');
+    hold(ax4, 'on');
+    plot(stimTimeArray(2:end), instantFreq(:, 1), plotArgs{:}, ...
+        'Color', s1Color, ...
+        'DisplayName', 'S1');
+    hold on;
+    plot(stimTimeArray(2:end), instantFreq(:, 2), plotArgs{:}, ...
+        'Color', s2Color, ...
+        'DisplayName', 'S2');
+    ylabel('Instant Freq (Hz)');
+    xlabel('Time (s)');    
+    legend(ax4);    
+    xlim([-waitT, duration + waitT]); 
+    ylim([minF * 0.99, maxF * 1.01])
+    ax4.YScale = 'log';
+    box('off');
+    grid('on');
+
+    ax5 = nexttile();
+    title(ax5, 'Parameters');
+    hold(ax5, 'on');
+    box(ax5, 'on');
+    str = '';
+    plot(0, NaN);
+    yticks([]);
+    xticks([]);
+    paramNames = fieldnames(parameters);
+    for iParam = 1:length(paramNames)
+        paramName = paramNames{iParam};
+        val = parameters.(paramName);
+        if isempty(str)
+            joinStr = '';
+        else
+            joinStr = ', ';
+        end
+        str = [str, joinStr, sprintf('%s=%s', paramName, ...
+            char(string(val)))];
+    end
+    str = sprintf('%s - (Generated on %s, Version %s)', str, ...
+        datestr(now()), VERSION);
+    curPos = f.Position;
+    newW = curPos(3) * 1.2;
+    newH = curPos(4) * 2.5;
+    f.Position = [curPos(1:2) - ([newW, newH] - curPos(3:4)), newW, newH];
+         
+    annotation('textbox', ax5.Position, 'String', str, 'LineStyle', ...
+        'none', 'FontName', 'FixedWidth', 'VerticalAlignment', 'middle');
+
+    linkaxes([ax1, ax2, ax3, ax4], 'x');   
+    
 end
 
+%% Format Outputs
+switch nargout
+    case 2
+        varargout = {timeArray};
+    case 3
+        varargout = {timeArray, parameters};
+    otherwise
+        varargout = {};
+end
 end
 
 
