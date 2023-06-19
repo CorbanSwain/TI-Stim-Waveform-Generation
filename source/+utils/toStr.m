@@ -52,7 +52,7 @@ elseif iscell(x) && isvector(x) && (length(x) < VECTOR_LEN_CUTOFF)
         else
             commaStr = [joinStr, ' '];
         end
-        s = [s, commaStr, char(csmu.toStr(x{iEle}))];
+        s = [s, commaStr, char(utils.toStr(x{iEle}))];
     end
     s = [s, '}'];
 else

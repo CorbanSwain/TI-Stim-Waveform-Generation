@@ -200,6 +200,9 @@ end
 switch lower(fmScale)
     case 'logf'
         if doSinFM
+            warning(['sin fmShape with log fmScale may produce', ...
+                ' unstable results due to the numerical integration', ...
+                ' algorithm utilized.'])
             baseFMPhaseFcn = @logfSinFMPhaseRamp;
         else
             % function returning phase as a function of time for performing
@@ -252,11 +255,11 @@ end
 if hasPO
     switch lower(sigmoidStr)
         case 'erf'
-            sigmoidFuncHand = @clampedErfSigmoid;
+            sigmoidFuncHand = @utils.clampedErfSigmoid;
         case 'sin'
-            sigmoidFuncHand = @halfSinSigmoid;
+            sigmoidFuncHand = @utils.halfSinSigmoid;
         case 'quad'
-            sigmoidFuncHand = @quadraticSigmoid;
+            sigmoidFuncHand = @utils.quadraticSigmoid;
         otherwise
             error('Unexpected value for sigmoidStr encounterd, ''%s''', ...
                 sigmoidStr);
@@ -271,7 +274,7 @@ end
 
 %% Build and Compose Piecewise Phase Function
 numPieces = (numSteps * 2) - 1;
-isModPiece = csmu.iseven(1:numPieces);
+isModPiece = utils.iseven(1:numPieces);
 
 stepIds = zeros(1, numPieces);
 stepIds(~isModPiece) = 1:numSteps;
@@ -439,21 +442,21 @@ end
 % ensure that the function will return NaN for value < 0
 composeFcnPieces = [{@(t) NaN}, phaseFcnPieces];
 composeKeytimes = [(0 - eps(0)), pieceEndTimes];
-phaseFcn = composePiecewiseFcn(composeFcnPieces, composeKeytimes);
+phaseFcn = utils.composePiecewiseFcn(composeFcnPieces, composeKeytimes);
 end
 
 function phi = logfSinFMPhaseRamp(t, t1, t2, f1, f2)
 % function defining a sinusoidal ramp from f1 to f2 in log(f)-space
-freqFcn = @(delt) f1 ...
+freqFcn = @(relt) f1 ...
     * exp((log(f2) - log(f1)) ...
-    * ((sin((2 * pi * delt / 2 / (t2 - t1)) ...
+    * ((sin((2 * pi * relt / 2) ...
     - (pi / 2)) / 2) + (1 / 2)));
 
 % the following lines perform an integral of (2 * pi * freqFcn) from t1 to
 % t for all values in the vector t
 
 % rescale integral to be from zero to one
-tDelta = t(:) - t1;
+tDelta = (t(:) - t1) / (t2 - t1);
 reScaledFcn = @(tt, ~) freqFcn(tt * tDelta) .* tDelta;
 
 % perform integration with ode45 solver

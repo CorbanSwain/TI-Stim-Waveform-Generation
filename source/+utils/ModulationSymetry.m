@@ -8,7 +8,7 @@ end
 methods (Static)
     function isMem = isMember(x)
         try
-            ModulationSymetry(x);
+            utils.ModulationSymetry(x);
         catch 
             isMem = false;
             return

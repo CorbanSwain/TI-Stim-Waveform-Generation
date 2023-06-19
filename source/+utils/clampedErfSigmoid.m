@@ -41,6 +41,10 @@ deltaX = x2 - x1;
 sigma = deltaX / (numSigmas * 2);
 mu = (x1 + x2) / 2;
 
+normpdf = @(x, mu, sigma) 1 / sigma / sqrt(2 * pi) ...
+    * exp(-1 / 2 * ((x - mu) / sigma) .^ 2); 
+normcdf = @(x, mu, sigma) 1 / 2 * (1 + erf((x - mu) / sigma / sqrt(2)));
+
 cdfFx = @(x) normcdf(x, mu, sigma);
 pdfFx = @(x) normpdf(x, mu, sigma);
 
