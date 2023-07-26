@@ -109,7 +109,7 @@ function [waveforms, varargout] = createTIStimWaveforms(duration, ...
 
 % Corban Swain, June 2023
 
-VERSION = 'v0.2.0';
+VERSION = 'v0.2.1';
 
 %% Input Handling
 isNumericScalar = @(x) isnumeric(x) && isscalar(x);
@@ -129,7 +129,7 @@ p.addParameter('A1', 1, isNonNegativeScalar);
 p.addParameter('A2', 1, isNonNegativeScalar);
 p.addParameter('BreakCarrierFreq', [], ...
     @(x) (utils.scalarStringLike(x) && isequal(lower(char(x)), 'same')) ...
-    || isPositiveScalar(x) || isempty(x));
+    || isNonNegativeScalar(x) || isempty(x));
 p.addParameter('FMTime', [], ...
     @(x) (utils.scalarStringLike(x) && isequal(lower(char(x)), 'auto')) ...
     || isNonNegativeScalar(x) || isempty(x));
