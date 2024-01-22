@@ -12,10 +12,10 @@ inputSpecification = {
     'Duration', 5 % seconds
 
     % The carrier frequency of the signals in Hz.
-    'CarrierFreq', 0 % hertz
+    'CarrierFreq', 2000 % hertz
 
     % The carrier frequency during the break of the signals in Hz.
-    'BreakCarrierFreq', 1000 % hertz (or 'same')
+    'BreakCarrierFreq', 5000 % hertz (or 'same')
 
     % The frequency of the pulses in Hz.
     'PulseFreq', 10 % hertz   
