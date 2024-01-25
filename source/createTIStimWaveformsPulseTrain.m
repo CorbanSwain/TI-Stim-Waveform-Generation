@@ -1,6 +1,6 @@
 function [waveforms, varargout] = createTIStimWaveformsPulseTrain( ...
     pulseDuration, rampDuration, pulseFreq, pulsesPerTrain, ...
-    carrierFreq, varargin)
+    carrierFreq, interferenceBeatFreq, varargin)
 %CREATETISTIMWAVEFORMSPULSETRAIN  Produces pulse trains for neural TI stim.
 %
 %   waveforms = createTIStimWaveforms(duration, carrierFreq, pulseFreq)
@@ -125,13 +125,15 @@ p = inputParser();
 PULSE_DUR_KEY = 'PulseDuration';
 p.addRequired(PULSE_DUR_KEY, isNonNegativeScalar); % seconds
 RAMP_DUR_KEY = 'RampDuration';
-p.addParameter(RAMP_DUR_KEY, @(x) isNonNegativeVecWithLen(x, [1, 2]);
+p.addParameter(RAMP_DUR_KEY, @(x) isNonNegativeVecWithLen(x, [1, 2]));
 PULSE_FQ_KEY = 'PulseFreq';
 p.addRequired(PULSE_FQ_KEY, isPositiveScalar); % hertz
 PPT_KEY = 'PulsesPerTrain';
 p.addRequired(PPT_KEY, isPositiveIntegerScalar);
 CARRIER_FQ_KEY = 'CarrierFreq';
 p.addRequired(CARRIER_FQ_KEY, isPositiveScalar); % hertz
+INTERF_BEAT_FREQ = 'InterferenceBeatFreq';
+p.addParameter(INTERF_BEAT_FREQ, isPositiveScalar);
 
 NUM_TRAIN_KEY = 'NumTrains';
 p.addParameter(NUM_TRAIN_KEY, 1, isPositiveIntegerScalar);
@@ -183,11 +185,12 @@ if nargin() == 1
 
         if isempty(matchIdx)
             error(['The parameter "%s" is required; it must', ...
-                ' be supplied if running this function with a single', ...
-                ' argument parameter struct.'], paramName);
+                ' be supplied if running this function with a' ...
+                ' single argument parameter struct.'], paramName);
         elseif numel(matchIdx) > 1
-            error(['Found multiple parameters with case-insensitive', ...
-                ' name "%s", only one should be passed.'], paramName);
+            error(['Found multiple parameters with' ...
+                ' case-insensitive name "%s", only one should be' ...
+                ' passed.'], paramName);
         end
 
         actualParamName = fnames{matchIdx};
@@ -195,13 +198,13 @@ if nargin() == 1
         inputStruct = rmfield(inputStruct, actualParamName);
     end
 
-    [pulseDuration, rampDuration, pulseFreq, pulsesPerTrain, ...
-        carrierFreq] = reqParams{:};
+    [pulseDuration, rampDuration, interferenceBeatFreq, ...
+        pulsesPerTrain, carrierFreq] = reqParams{:};
     varargin = {inputStruct};
 end
 
-p.parse(pulseDuration, rampDuration, pulseFreq, pulsesPerTrain, ...
-    carrierFreq, varargin{:});
+p.parse(pulseDuration, rampDuration, interferenceBeatFreq, ...
+    pulsesPerTrain, carrierFreq, varargin{:});
 
 nargoutchk(0, 3);
 
@@ -229,156 +232,93 @@ doControl = inputs.(DO_CONTROL_KEY);
 doPlot = inputs.(DO_PLOT_KEY);
 doDebug = inputs.(DO_DEBUG_KEY);
 
-
-if doDebug
-    debugFM = true;
-    for iArg = 1:length(fmArgs)
-        % if debug has already been pass in the fmArgs array then dont add
-        % a duplicate and potentially conflicting entry
-        if strcmpi('debug', fmArgs{iArg})
-            debugFM = false;
-        end
-    end
-
-    % by default if debugging this func, also debug the fm func
-    if debugFM
-        fmArgs = [fmArgs, {'Debug', true}];
-        parameters.FMArgs = fmArgs;
-    end
-end
-
-if pulseFreq >= carrierFreq
+if interferenceBeatFreq >= carrierFreq
     error('pulseFreq must be less than carrierFreq.')
 end
 
-if pulseFreq > (carrierFreq / 5)
+
+if interferenceBeatFreq > (carrierFreq / 5)
     warning(['The pulse frequency (%.1f Hz) should be much lower', ...
         ' than the carrier frequency (%.1f Hz), consider increasing', ... 
-        ' the carrier frequency.'], pulseFreq, carrierFreq)
+        ' the carrier frequency.'], interferenceBeatFreq, carrierFreq)
 end
 
-cyclePeriod = 1 / pulseFreq;
-pulseT = cyclePeriod * dutyCycle;
+fullPulseDuration = sum(rampT, 'all') + pulseDuration;
+pulsePeriod = 1 / pulseFreq;
 
-% set computed default values for breakCFreq, modT
-doAutoSet = isempty(breakCFreq);
-if ~doAutoSet && utils.scalarStringLike(breakCFreq)
-    if strcmpi(breakCFreq, 'same')
-        doAutoSet = true;
-    else
-        error(['Encountered unexpected value for breakFreq, ''%s'';', ...
-            ' should be ''same'' or a positve scalar value.'], ...
-            breakCFreq)
-    end
-end
-if doAutoSet
-    breakCFreq = carrierFreq;
-    parameters.BreakCarrierFreq = breakCFreq;
+if fullPulseDuration > pulsePeriod
+    error(['The pulse + ramp duration ' ...
+        '(%.1f + sum([%s], ''all'') = %.1f s) ' ...
+        'must not be longer ' ...
+        'than 1 / pulseFreq (pulsePeriod = %.1f s)'], ...
+        pulseDuration, rampT, fullPulseDuration, pulsePeriod)
 end
 
-doAutoSet = isempty(modT);
-if ~doAutoSet && utils.scalarStringLike(modT)
-    if strcmpi(modT, 'auto')
-       doAutoSet = true;
-    else
-        error(['Encountered unexpected value for modT, ''%s'';',...
-            ' should be ''auto'' or a non-negative scalar value.'], modT);
-    end
-end
-if doAutoSet
-    modT = pulseT * 0.2;
-    parameters.FMTime = modT;
-end
+interfCyclePeriod = 1 / interferenceBeatFreq;
 
-if modT > (pulseT / 2)
-    warning(['The modulation time cannot be more than half the pulse', ...
-        ' period (pulsePeriod/2=%f s); clipping the modulation time', ...
-        ' to this max value.'], pulseT/2);
-    modT = pulseT / 2;
-    parameters.FMTime = modT;
-end
-
-totalRampTime = sum(rampT);
-if totalRampTime > duration
-    warning(['The total ramp time (sum(rampT(:)'' .* [1, 1])) cannot', ... 
-        ' be greater than the stimulus duration. Scalling total ramp', ...
-        ' time to equal the stimulus duration (%f s).'], duration)
-    rampT = (rampT / totalRampTime) * duration;
-    parameters.RampTime = rampT;
-end
 
 %% Computed Values
-% cyclePeriod = 1 / pulseFreq;
-% pulseT = cyclePeriod * dutyCycle;
+% fullPulseDuration = sum(rampT, 'all') + pulseDuration;
+% pulsePeriod = 1 / pulseFreq;
 sampPeriod = 1 / sampRate;
-breakT = cyclePeriod - pulseT;
-pulseCFDelta = (1 / pulseT);
-noBreak = dutyCycle == 1;
-noPulse = dutyCycle == 0;
+breakT = pulsePeriod - pulsePeriod;
+% noBreak = breakT < eps();
+% noPulse = fullPulseDuration < eps();
+breakCarrierFreq = 0;
+modT = 0;
+totalTrainDuration = pulsePeriod * pulsesPerTrain;
+
 numSignals = 2;
 
-if noBreak || noPulse
-    stimTimeSteps = duration;
-    numSteps = 1;
-    refFreqSteps = carrierFreq;  
+numFreqStepsPerPulse = 2;
+numStepsPerTrain = pulsesPerTrain * numFreqStepsPerPulse;
+cycleNumsHelper = [0, repelem(0:(pulsesPerTrain - 1), ...
+    numFreqStepsPerPulse)];
+stimTimeStepsHelper = [0, ...
+    repmat([pulseDuration, pulsePeriod], [1, numPulses])];
 
-    if noBreak 
-        pulseSel = 1;
-    else 
-        % noPulse == true
-        pulseSel = [];
-    end
+stimTimeSteps = (breakT / 2) ...
+    + (stimTimeStepsHelper + (cycleNumsHelper .* pulsePeriod));
+stimTimeSteps = stimTimeSteps(1:(end - 1));
+% cycleNums = repelem(1:numPulses, 2);    
 
-    basePOSteps = pi;    
-else    
-    numPulses = ceil(duration / cyclePeriod) + 1;
-    numSteps = numPulses * 2;
-    cycleNumsHelper = [0, repelem(0:(numPulses - 1), 2)];
-    stimTimeStepsHelper = [0, ...
-        repmat([pulseT - modT, cyclePeriod], [1, numPulses])];
+refFreqSteps = repmat([breakCarrierFreq, carrierFreq], [1, numPulses]);   
+pulseSel = 2:2:numStepsPerTrain;
 
-    stimTimeSteps = (breakT / 2) ...
-        + (stimTimeStepsHelper + (cycleNumsHelper .* cyclePeriod));
-    stimTimeSteps = stimTimeSteps(1:(end - 1));
-    % cycleNums = repelem(1:numPulses, 2);    
+if ~doControl
+    % during the break the signals must be perfectly out of phase;
+    % that is 180 deg or pi rad of phase offset.
+    breakPO = pi;
+    
+    % pulsePODelta is chosen such that at the end of the frequency
+    % modulation the modulated signal will be at the phase offset
+    % location corresponding to where the phase offset would be for a
+    % pulse beginning at pi phase offset with no frequency modulation
+    % (i.e. an abrupt frequency and phase step). This allows the "duty
+    % cycle" modified pulse to mimic a non duty cycle modified pulse
+    % (given the same pulse-carrierFrequency difference, which--as an
+    % aside--is not the same as having the same pulse frequency).
+    pulsePODelta = wrapToPi(interferenceBeatFreq * 2 * pi * modT);
+    
+    pulsePO = wrapToPi(pulsePODelta + breakPO);
 
-    refFreqSteps = repmat([breakCFreq, carrierFreq], [1, numPulses]);   
-    pulseSel = 2:2:numSteps;
-
-    if ~doControl
-        % during the break the signals must be perfectly out of phase;
-        % that is 180 deg or pi rad of phase offset.
-        breakPO = pi;
-        
-        % pulsePODelta is chosen such that at the end of the frequency
-        % modulation the modulated signal will be at the phase offset
-        % location corresponding to where the phase offset would be for a
-        % pulse beginning at pi phase offset with no frequency modulation
-        % (i.e. an abrupt frequency and phase step). This allows the "duty
-        % cycle" modified pulse to mimic a non duty cycle modified pulse
-        % (given the same pulse-carrierFrequency difference, which--as an
-        % aside--is not the same as having the same pulse frequency).
-        pulsePODelta = wrapToPi(pulseCFDelta * 2 * pi * modT);
-        
-        pulsePO = wrapToPi(pulsePODelta + breakPO);
-
-        basePOSteps = repmat([breakPO, pulsePO], [1, numPulses]);
-    end
+    basePOSteps = repmat([breakPO, pulsePO], [1, numPulses]);
 end
 
 if ~doControl
-    %% Define Frequence Modulation Steps
+    %% Define Frequency Modulation Steps
     stimFreqSteps = repmat(refFreqSteps, [numSignals, 1]);
     switch symetry
         case utils.ModulationSymetry.SIGNAL1
             stimFreqSteps(1, pulseSel) = ...
-                stimFreqSteps(1, pulseSel) + pulseCFDelta;
+                stimFreqSteps(1, pulseSel) + interferenceBeatFreq;
         case utils.ModulationSymetry.SIGNAL2
             stimFreqSteps(2, pulseSel) = ...
-                stimFreqSteps(2, pulseSel) + pulseCFDelta;
+                stimFreqSteps(2, pulseSel) + interferenceBeatFreq;
         case utils.ModulationSymetry.SYMETRIC
             stimFreqSteps(:, pulseSel) = ...
-                stimFreqSteps(:, pulseSel) + ([+1; -1] * pulseCFDelta / 2);
+                stimFreqSteps(:, pulseSel)...
+                + ([+1; -1] * interferenceBeatFreq / 2);
     end
 
     %% Define Phase Modulation Steps
@@ -386,11 +326,11 @@ if ~doControl
         case utils.ModulationSymetry.SIGNAL1
             % NaN phase offset for signal 2 since it will be the reference
             % phase. It's phase will be determind based on continuity.
-            stimPOSteps = [basePOSteps; repelem(NaN, numSteps)];
+            stimPOSteps = [basePOSteps; repelem(NaN, numStepsPerTrain)];
         case utils.ModulationSymetry.SIGNAL2
             % NaN phase offset for signal 1 since it will be the reference
             % phase. It's phase will be determind based on continuity.
-            stimPOSteps = [repelem(NaN, numSteps); basePOSteps];
+            stimPOSteps = [repelem(NaN, numStepsPerTrain); basePOSteps];
         case utils.ModulationSymetry.SYMETRIC
             if noBreak || noPulse
                 stimPOSteps = [basePOSteps; -basePOSteps] / 2;
@@ -406,14 +346,14 @@ if ~doControl
                 stimPOStepsLong = [
                     repmat(symetricPOStepCycle1, [1, nReps]);
                     repmat(symetricPOStepCycle2, [1, nReps])];
-                stimPOSteps = stimPOStepsLong(:, 1:numSteps);
+                stimPOSteps = stimPOStepsLong(:, 1:numStepsPerTrain);
             end
     end
 end
 
 %% Generate Phase Functions
-refPhaseFcn = utils.generateFMPhaseFcn(stimTimeSteps, refFreqSteps, modT, ...
-    fmArgs{:});
+refPhaseFcn = utils.generateFMPhaseFcn(...
+    stimTimeSteps, refFreqSteps, modT);
 
 if doControl
     phaseFcns = {refPhaseFcn, @(t) wrapTo2Pi(refPhaseFcn(t) + pi)};
@@ -433,21 +373,43 @@ else
             stimFreqSteps(iSignal, :), ...
             modT, ...
             'PhaseOffsetSteps', stimPOSteps(iSignal, :), ...
-            'RefPhaseFcn', refPhaseFcn, ...
-            fmArgs{:});
+            'RefPhaseFcn', refPhaseFcn);
     end
 end
 
 %% Handle Ramping and Waiting
-rampWaitTimes = [rampT(1), duration - rampT(2), duration];
-rampWaitFcns = {
-    @(t) t / rampT(1)
-    @(~) 1
-    @(t) -1 * (t - duration) / rampT(2)};
+numRampStepsPerPulse = 4;
+numRampStepsPerTrain = (numRampStepsPerPulse * pulsesPerTrain) + 1;
+rampCycleNumsHelper = [0, repelem(0:(pulsesPerTrain - 1), ...
+    numRampStepsPerPulse)];
+rampTimeHelper = [0, repmat(...
+    cumsum([rampT(1), pulseDuration, rampT(2), breakT]), ...
+    [1, pulsesPerTrain])];
+rampTimeHelper = (breakT / 2) ...
+    + rampTimeHelper * (rampCycleNumsHelper * pulsePeriod);
+rampTimeHelper(end) = rampTimeHelper(end) - (breakT / 2);
+rampStep = [0, repmat([1, 2, 3, 0], [1, pulsesPerTrain])];
+
+rampWaitFcns = cell(numRampStepsPerPulse * pulsesPerTrain, 1);
+for iFcn = 1:numRampStepsPerTrain
+    switch rampStep(iFcn)
+        case 0
+            stepFcn = @(~) 0;
+        case 1
+            stepFcn = @(t) (t - rampTimeHelper(iFcn) + rampT(1)) ...
+                / rampT(1);
+        case 2
+            stepFcn = @(~) 1;
+        case 3
+            stepFcn = @(t) -1 * (t - rampTimeHelper(iFcn)) / rampT(2);
+    end
+    rampWaitFcns{iFcn} = stepFcn;
+end
+
 ampFcn = utils.composePiecewiseFcn(rampWaitFcns, rampWaitTimes);
 
 %% Generate Waveforms
-timeArray = colon(-waitT(1), sampPeriod, duration + waitT(2))';
+timeArray = colon(0, sampPeriod, totalTrainDuration)';
 numSamples = length(timeArray);
 stimSelection = (timeArray > 0) & (timeArray < duration);
 stimTimeArray = timeArray(stimSelection);
@@ -459,6 +421,48 @@ for iSignal = 1:numSignals
         sin(phaseforms(:, iSignal)) .* ampFcn(stimTimeArray); 
 end
 waveforms = waveforms .* [amp1, amp2];
+
+
+%% Generate Sequential Pulse Trains
+numInterTrainIntervals = numTrains - 1;
+if numInterTrainIntervals > 0
+    interTrainIntervalLength = ceil(interTrainInterval / sampPeriod);
+    interTrainMatrix = zeros([interTrainIntervalLength, numSignals], ...
+        'like', waveforms);
+    
+    originalWaveforms = waveforms;
+    waveforms = cat(1, ...
+        repmat(cat(1, originalWaveforms, interTrainMatrix), ...
+        [numInterTrainIntervals, 1]), ...
+        originalWaveforms);
+    numSamples = size(waveforms, 1);
+    timeArray = colon(0, (numSamples - 1))' * sampPeriod;
+end
+
+
+%% Add Wait Before and After Stimulus
+preWaitLength = ceil(waitT(1) / sampPeriod);
+if preWaitLength > 0
+    preWaitMatrix = zeros([preWaitLength, numSignals], 'like', ...
+        waveforms);
+
+    waveforms = cat(1, preWaitMatrix, waveforms);
+    timeSubArray = colon(-preWaitLength, -1) * sampPeriod;
+    timeArray = cat(1, timeSubArray, timeArray);
+    numSamples = numSamples + preWaitLength;
+end
+
+postWaitLength = ceil(waitT(2) / sampPeriod);
+if postWaitLength > 0
+    postWaitMatrix = zeros([postWaitLength, numSignals], 'like', ...
+        waveforms);
+
+    waveforms = cat(1, postWaitMatrix, waveforms);
+    timeSubArray = timeArray(end) ...
+        + (colon(1, postWaitLength) * sampPeriod);
+    timeArray = cat(1, timeArray, timeSubArray);
+    numSamples = numSamples + postWaitLength;
+end
 
 %% Display Plots
 if doPlot
@@ -662,7 +666,8 @@ if doPlot
     curPos = f.Position;
     newW = curPos(3) * 1.2;
     newH = curPos(4) * 2.2;
-    f.Position = [curPos(1:2) - ([newW, newH] - curPos(3:4)), newW, newH];
+    f.Position = [curPos(1:2) - ([newW, newH] - curPos(3:4)), ...
+        newW, newH];
          
     annotation('textbox', ax5.Position, 'String', str, 'LineStyle', ...
         'none', 'FontName', 'FixedWidth', ...
