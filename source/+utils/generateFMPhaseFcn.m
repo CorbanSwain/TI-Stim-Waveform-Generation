@@ -134,7 +134,7 @@ modTimes = ...
     modulationTime(:)' .* ones(1, numMods, 'like', modulationTime);
 
 timeDeltas = diff([0, timeSteps(:)']);
-if ~all(timeDeltas > 0)
+if any(timeDeltas < 0)
     error('The vector [0, timeSteps] must be monotonically increassing.')
 end
 
@@ -289,6 +289,12 @@ pieceEndTimes(isModPiece) = pieceEndTimes(isModPiece) + modTimes;
 pieceStartTimes = [0, pieceEndTimes(1:(end - 1))];
 
 if hasPO
+    usePO = ~isnan(poSteps(1));
+else
+    usePO = false;
+end
+
+if usePO
     priorPhase = wrapTo2Pi(refPhaseFcn(pieceStartTimes(1)) + poSteps(1));
 else
     priorPhase = 0;
@@ -349,10 +355,19 @@ for iPiece = 1:numPieces
                  
         fmPhaseFcn = @(t) fmFcnByUnqFreqMod{unqFMId}(t, startTime);
                
-        if hasPO
-            nextStepId = stepIds(iPiece + 1);
+        if hasPO 
+            nextStepId = stepIds(iPiece + 1);            
             targetPO = poSteps(nextStepId);
-                                    
+            usePO = ~isnan(targetPO);
+            if ~usePO
+                sprintf(['> Found NaN in phaseOffsetSteps, not' ...
+                    ' utilizing for FM phase piece %d.'], iPiece);
+            end
+        else
+            usePO = false;
+        end
+
+        if usePO                                               
             if modTime == 0
                 phaseModShift = wrapTo2Pi(targetPO ...
                     + refPhaseFcn(startTime) - fmPhaseFcn(startTime));

@@ -110,7 +110,7 @@ function [waveforms, varargout] = createTIStimWaveformsPulseTrain( ...
 
 % Corban Swain, June 2023
 
-VERSION = 'v0.3.0';
+VERSION = 'v0.3.2';
 
 %% Input Handling
 isNumericScalar = @(x) isnumeric(x) && isscalar(x);
@@ -234,6 +234,24 @@ doControl = inputs.(DO_CONTROL_KEY);
 doPlot = inputs.(DO_PLOT_KEY);
 doDebug = inputs.(DO_DEBUG_KEY);
 
+fmArgs = {};
+if doDebug
+    debugFM = true;
+    for iArg = 1:length(fmArgs)
+        % if debug has already been pass in the fmArgs array then dont add
+        % a duplicate and potentially conflicting entry
+        if strcmpi('debug', fmArgs{iArg})
+            debugFM = false;
+        end
+    end
+
+    % by default if debugging this func, also debug the fm func
+    if debugFM
+        fmArgs = [fmArgs, {'Debug', true}];
+    end
+end
+
+
 if interferenceBeatFreq >= carrierFreq
     error('`%s` (%.1f) must be less than `%s` (%.1f).', ...
         INTERF_BEAT_FREQ_KEY, interferenceBeatFreq, ...
@@ -267,10 +285,14 @@ interfCyclePeriod = 1 / interferenceBeatFreq;
 % pulsePeriod = 1 / pulseFreq;
 sampPeriod = 1 / sampRate;
 breakT = pulsePeriod - fullPulseDuration;
-% noBreak = breakT < eps();
+noBreak = breakT < eps();
 % noPulse = fullPulseDuration < eps();
 breakCarrierFreq = 0;
-modT = 0;
+if noBreak
+    modT = 0;
+else
+    modT = breakT / 3;
+end
 totalTrainDuration = pulsePeriod * pulsesPerTrain;
 
 numSignals = 2;
@@ -280,12 +302,13 @@ numStepsPerTrain = (pulsesPerTrain * numFreqStepsPerPulse) + 1;
 cycleNumsHelper = [0, repelem(0:(pulsesPerTrain - 1), ...
     numFreqStepsPerPulse)];
 stimTimeStepsHelper = [0, ...
-    repmat([fullPulseDuration, pulsePeriod], [1, pulsesPerTrain])];
+    repmat([fullPulseDuration + modT, pulsePeriod], ...
+    [1, pulsesPerTrain])];
+stimTimeStepsHelper = stimTimeStepsHelper - modT;
 
 stimTimeSteps = (breakT / 2) ...
     + (stimTimeStepsHelper + (cycleNumsHelper .* pulsePeriod));
-stimTimeSteps(end) = stimTimeSteps(end) - (breakT / 2);
-% cycleNums = repelem(1:numPulses, 2);    
+stimTimeSteps(end) = stimTimeSteps(end) - (breakT / 2) + modT;   
 
 refFreqSteps = [repmat([breakCarrierFreq, carrierFreq], ...
     [1, pulsesPerTrain]), breakCarrierFreq];   
@@ -308,9 +331,81 @@ if ~doControl
     end 
 end
 
+if ~doControl
+    % during the break the signals must be perfectly out of phase;
+    % that is 180 deg or pi rad of phase offset.
+    breakPO = 0;
+    
+    % pulsePODelta is chosen such that at the end of the frequency
+    % modulation the modulated signal will be at the phase offset
+    % location corresponding to where the phase offset would be for a
+    % pulse beginning at pi phase offset with no frequency modulation
+    % (i.e. an abrupt frequency and phase step). This allows the "duty
+    % cycle" modified pulse to mimic a non duty cycle modified pulse
+    % (given the same pulse-carrierFrequency difference, which--as an
+    % aside--is not the same as having the same pulse frequency).
+    pulsePODelta = -1 * wrapToPi(interferenceBeatFreq * 2 * pi * modT);
+    
+    targetPulseStartPO = pi;
+    % pulsePO = wrapToPi(pulsePODelta + targetPulseStartPO);
+    pulsePO = targetPulseStartPO;
+
+    basePOSteps = [repmat([breakPO, pulsePO], [1, pulsesPerTrain]), ... 
+        breakPO];
+end
+
+if ~doControl
+    %% Define Frequency Modulation Steps
+    stimFreqSteps = repmat(refFreqSteps, [numSignals, 1]);
+    switch symetry
+        case utils.ModulationSymetry.SIGNAL1
+            stimFreqSteps(1, pulseSel) = ...
+                stimFreqSteps(1, pulseSel) + interferenceBeatFreq;
+        case utils.ModulationSymetry.SIGNAL2
+            stimFreqSteps(2, pulseSel) = ...
+                stimFreqSteps(2, pulseSel) + interferenceBeatFreq;
+        case utils.ModulationSymetry.SYMETRIC
+            stimFreqSteps(:, pulseSel) = ...
+                stimFreqSteps(:, pulseSel)...
+                + ([+1; -1] * interferenceBeatFreq / 2);
+    end
+
+    %% Define Phase Modulation Steps
+    switch symetry
+        case utils.ModulationSymetry.SIGNAL1
+            % NaN phase offset for signal 2 since it will be the reference
+            % phase. It's phase will be determind based on continuity.
+            stimPOSteps = [basePOSteps; repelem(NaN, numStepsPerTrain)];
+        case utils.ModulationSymetry.SIGNAL2
+            % NaN phase offset for signal 1 since it will be the reference
+            % phase. It's phase will be determind based on continuity.
+            stimPOSteps = [repelem(NaN, numStepsPerTrain); basePOSteps];
+        case utils.ModulationSymetry.SYMETRIC
+            if noBreak || noPulse
+                stimPOSteps = [basePOSteps; -basePOSteps] / 2;
+            else
+                halfPODelta = (pulsePODelta / 2);
+                symetricPOStepCycle1 = [
+                    (     breakPO / 2) + [0,      halfPODelta], ...
+                    (-1 * breakPO / 2) + [0,      halfPODelta]];
+                symetricPOStepCycle2 = [
+                    (-1 * breakPO / 2) + [0, -1 * halfPODelta], ...
+                    (     breakPO / 2) + [0, -1 * halfPODelta]];
+                nReps = ceil(pulsesPerTrain/2) + 1;
+                stimPOStepsLong = [
+                    repmat(symetricPOStepCycle1, [1, nReps]);
+                    repmat(symetricPOStepCycle2, [1, nReps])];
+                stimPOSteps = stimPOStepsLong(:, 1:numStepsPerTrain);
+            end
+    end
+end
+
 %% Generate Phase Functions
 refPhaseFcn = utils.generateFMPhaseFcn(...
-    stimTimeSteps, refFreqSteps, modT);
+    stimTimeSteps, refFreqSteps, modT, ...
+    'PhaseOffsetSteps', zeros(1, numStepsPerTrain), ...
+    'RefPhaseFcn', @(~) 0, ...
+    fmArgs{:});
 
 if doControl
     phaseFcns = {refPhaseFcn, @(t) wrapTo2Pi(refPhaseFcn(t) + pi)};
@@ -329,7 +424,9 @@ else
             stimTimeSteps, ...
             stimFreqSteps(iSignal, :), ...
             modT, ...
-            'RefPhaseFcn', refPhaseFcn);
+            'PhaseOffsetSteps', stimPOSteps(iSignal, :), ...
+            'RefPhaseFcn', refPhaseFcn, ...
+            fmArgs{:});
     end
 end
 
@@ -476,14 +573,24 @@ if doPlot
 
             ax1 = nexttile();
         end
-        pspectrum(waveforms(:, 1), spectArgs{:});
+        try
+            pspectrum(waveforms(:, 1), spectArgs{:});
+        catch ME
+            warning('pspectrum plot 1 failed.\n\t%s\n\t', ...
+                ME.identifier, ME.message)
+        end
 
         if useSubplot
             ax2 = subplot(3, 1, 1);
         else
             ax2 = nexttile();
         end
-        pspectrum(waveforms(:, 2), spectArgs{:});
+        try
+            pspectrum(waveforms(:, 2), spectArgs{:});
+        catch ME
+            warning('pspectrum plot 2 failed.\n\t%s\n\t%s', ...
+                ME.identifier, ME.message)
+        end
 
 
         if useSubplot
@@ -491,7 +598,12 @@ if doPlot
         else
             ax3 = nexttile();
         end
-        pspectrum(compWaveform, spectArgs{:});
+        try
+            pspectrum(compWaveform, spectArgs{:});
+        catch ME
+            warning('pspectrum plot 3 failed.\n\t%s\n\t%s', ...
+                ME.identifier, ME.message)
+        end
 
         linkaxes([ax1, ax2, ax3], 'x'); 
     end
