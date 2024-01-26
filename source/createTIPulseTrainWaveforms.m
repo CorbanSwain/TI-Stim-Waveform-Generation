@@ -1,53 +1,47 @@
-function [waveforms, varargout] = createTIStimWaveformsPulseTrain( ...
+function [waveforms, varargout] = createTIPulseTrainWaveforms( ...
     pulseDuration, rampDuration, pulseFreq, pulsesPerTrain, ...
     carrierFreq, interferenceBeatFreq, varargin)
-%CREATETISTIMWAVEFORMSPULSETRAIN  Produces pulse trains for neural TI stim.
+%CREATETIPULSETRAINWAVEFORMS  Produces pulse trains for neural TI stim.
 %
-%   waveforms = createTIStimWaveforms(duration, carrierFreq, pulseFreq)
-%   Produces a pair of stimulation waveforms of duration seconds using
-%   carrier frequency carrierFreq Hz and interferes to produce a pulse
-%   frequency of pulseFreq Hz.
+%   waveforms = createTIPulseTrainWaveforms(pulseDuration, rampDuration,
+%   pulseFreq, pulsesPerTrain, carrierFreq, interferenceBeatFreq) Produces
+%   a pair (2 column matrix) of stimulation waveforms of that consist of a
+%   train of pulsesPerTrain pulses with each pulse lasting pulseDuration
+%   seconds plus a ramp up and ramp down time as specified by rampDuration.
+%   Each pulse modulates the each waveform to a frequency near carrierFreq
+%   Hz to interfere to produce beats at interferenceBeatFreq Hz when the
+%   waveforms are summed.
 %
-%   waveforms will have size = [(duration + sum(waitT .* [1, 1])) *
-%   sampRate, 2]
+%   The ramp specified by rampDuration linearly ramps the stimulation 
+%   amplitudes from 0 to amp1 and amp2 over rampT(1) seconds at the 
+%   beginning of each pulse and from amp1 and amp2 to 0 over rampT(2) 
+%   seconds at the end of each pulse. Where rampT = rampDuration .* [1, 1].
+%   To specify different values for the ramp up time (1) and ramp down time
+%   (2), supply a 2-element vector for this parameter.
 %
-%   createTIStimWaveforms(__, 'SamplingRate', sampRate) {sampRate=100e3}
-%   Defines the sampling rate for the waveforms in Hz.
+%   createTIPulseTrainWaveforms(__, 'NumTrains', numTrains)
+%   {numTrains=1} Produces waveforms which repeats the stimulation 
+%   numTrains time(s). Must be >= 1.
 %
-%   createTIStimWaveforms(__, 'A1', amp1, 'A2', amp2) {amp1=1, amp2=1}
-%   Sets the amplitude of the wavforms in arbitrairy units.
+%   createTIPulseTrainWaveforms(__, 'InterTrainInterval', interTrainT)
+%   {interTrainT=1} Defines the amount of time in seconds between
+%   subsequent pulse trains. Has no effect if numTrains==1.
 %
-%   createTIStimWaveforms(__, 'DutyCycle', dutyCycle) {dutyCycle=1}
-%   Modulates the signals such that the stimulation only occurs for
-%   dutyCycle * (1 / pulseFreq) seconds (i.e. dutyCycle fraction) of the
-%   pulse period.
+%   The total strict stimulation time is given by:
+%       totalStimTime = ((((1 / pulseFreq) * pulsesPerTrain) * numTrains)
+%                        + (interTrainT * (numTrains - 1))) 
 %
-%   createTIStimWaveforms(__, 'BreakCarrierFreq', breakFreq) 
-%   {breakFreq='same'} If dutyCycle < 1, the carrier frequency will be
-%   modulated to breakFreq during the no stimulation period. If unset,
-%   breakFreq will be set to match the carrierFreq.
+%   createTIPulseTrainWaveforms(__, 'SamplingRate', sampRate) 
+%   {sampRate=100e3} Defines the sampling rate for the waveforms in Hz.
 %
-%   createTIStimWaveforms(__, 'FMTime', modT, 'FMArgs', fmArgs)
-%   {modT='auto', fmArgs=cell()} modT sets the modulation time during which
-%   the wavforms will smoothly transition from an initial frequency and
-%   relative phase to a new frequency and relative phase. By default
-%   modT=((1/pulseFreq)*dutyCycle*0.2), meaning 20% of the pulse time is
-%   used to modulate into the pulse and another 20% of the pulse time is
-%   used to modulate out of the pulse. The frequency modulation occurs only
-%   after the pulse is set to begin and completes before the pulse is set
-%   to end. The value for modT is limited to the interval [0,
-%   ((1/pulseFreq)*dutyCycle/2)]; values greater than the upper limit will
-%   be clipped and a warning will be raised.
-% 
-%   No modulation is performd and modT is ignored if dutyCycle==1.
+%   createTIPulseTrainWaveforms(__, 'A1', amp1, 'A2', amp2) 
+%   {amp1=1, amp2=1} Sets the amplitude of the waveforms in arbitrairy 
+%   units.
 %
-%   Parameters for controlling the generation of the modulated signal
-%   (UTILS.GENERATEFMPHASEFCN) can be set using fmArgs.
-%
-%   createTIStimWaveforms(__, 'ModulationSymetry', symetry)
+%   createTIPulseTrainWaveforms(__, 'ModulationSymetry', symetry)
 %   {symetry='signal1'} symetry determines if:
 %       - 'signal1'  : only the first waveform will be modulated while the
-%                      second remains at the carrierFreq (or breakFreq).
+%                      second remains at the carrierFreq.
 %                      signal 1 will be modulated to a higher frequency
 %                      than the carrier frequency during the pulse.
 %       - 'signal2'  : only the second waveform will be modulated. signal 2
@@ -64,51 +58,56 @@ function [waveforms, varargout] = createTIStimWaveformsPulseTrain( ...
 %   symetry must be a valid member or initializer of the
 %   UTILS.MODULATIONSYMETRY enumeration class.
 %
-%   createTIStimWaveforms(__, 'Flip', doFlip) {doFlip=false} If doFlip is
-%   true, then waveform 1 will be inverted (i.e. multiplied by -1 or
-%   shifted in phase 180 deg). This setting might be useful to correct for
-%   hardware setup errors and/or implementation details.
+%   createTIPulseTrainWaveforms(__, 'Flip', doFlip) {doFlip=false} If 
+%   doFlip is true, then waveform 1 will be inverted (i.e. multiplied by 
+%   -1 or shifted in phase 180 deg). This setting might be useful to 
+%   correct for hardware setup polarity errors and/or implementation 
+%   details.
 %
-%   createTIStimWaveforms(__, 'RampTime', rampT) {rampT=0.5} Linearly ramps
-%   the stimulation amplitudes from 0 to amp1 and amp2 over rampT seconds.
-%   To specify different values for the ramp up time (1) and ramp down time
-%   (2), supply a 2-element vector for this parameter.
+%   createTIPulseTrainWaveforms(__, 'RampTime', rampT) {rampT=0.5} Linearly 
+%   ramps the stimulation amplitudes from 0 to amp1 and amp2 over rampT 
+%   seconds. To specify different values for the ramp up time (1) and ramp 
+%   down time (2), supply a 2-element vector for this parameter.
 % 
-%   createTIStimWaveforms(__, 'WaitTime', waitT) {waitT=0.1} Adds a period
-%   of no stimulation before (1) and after (2) the stimulation period in
-%   seconds. To specify different values for the pre-stimulation wait and
-%   the post-stimulation wait, supply a 2-element vector for this
-%   parameter.
+%   createTIPulseTrainWaveforms(__, 'WaitTime', waitT) {waitT=0.1} Adds a 
+%   period of no stimulation before (1) and after (2) the stimulation 
+%   period in seconds. To specify different values for the pre-stimulation
+%   wait and the post-stimulation wait, supply a 2-element vector for this
+%   parameter (similar to rampDuration).
 %
-%   The ramp occurs at the beginning and end WITHIN the stimulation time,
-%   the wait occurs at the beginning and end OUTSIDE of the stimualtin
-%   time. The total waveform time will be duration + sum([1, 1] .* waitT).
+%   The ramp occurs at the beginning and end of every pulse WITHIN the 
+%   strict stimulation time, while the wait occurs at the beginning and end 
+%   OUTSIDE of the strict stimualtin time.
 %
-%   createTIStimWaveforms(__, 'Control', doControl) {doControl=false} If
-%   doControl is true no stimulation will be performed, only unmodulated
-%   waveformes at breakFreq will be applied.
+%   The total waveform time is on the interval:
+%       waveformDomain = [-waitT(1), totalStimTime + waitT(2)] 
 %
-%   createTIStimWaveforms(__, 'Plot', doPlot) {doPlot=true} If doPlot is
-%   true a preview of the stimulation waveforms and their sum will be
-%   displayed on a plot.
+%   createTIPulseTrainWaveforms(__, 'Control', doControl) {doControl=false} 
+%   If doControl is true no stimulation will be performed and reference 
+%   waveforms will be produced.
 %
-%   createTIStimWaveforms(__, 'Debug', doDebug) {doDebug=false} will run
-%   the waveform creation code in debug mode if doDebug is true.
+%   createTIPulseTrainWaveforms(__, 'Plot', doPlot) {doPlot=true} If doPlot 
+%   is true a preview of the stimulation waveforms and their sum will be
+%   displayed in a plot.
 %
-%   [waveforms, T] = createTIStimWaveforms(__) also returns the
+%   createTIPulseTrainWaveforms(__, 'Debug', doDebug) {doDebug=false} will 
+%   run the waveform creation code in debug mode if doDebug is true.
+%
+%   [waveforms, T] = createTIPulseTrainWaveforms(__) also returns the
 %   time column vector T having the same number of rows as waveforms. The
 %   stimulation begins at time 0s, so if waitT(1) > 0, there will be
 %   negative time points.
 %
-%   [waveforms, T, parameters] = createTIStimWaveforms(__) also returns the
-%   parameters used for running the function as a struct.
+%   [waveforms, T, parameters] = createTIPulseTrainWaveforms(__) also 
+%   returns the parameters used for running the function as a struct.
 %
-%   createTIStimWaveforms(parameters) will run the creation code using the
-%   provided parameters struct.
+%   createTIPulseTrainWaveforms(parameters) will run the creation code 
+%   using the provided parameters struct.
 %
-%   See also UTILS.GENERATEFMPHASEFCN, UTILS.MODULATIONSYMETRY.
+%   See also CREATETISTIMWAVEFORMS, UTILS.GENERATEFMPHASEFCN, 
+%       UTILS.MODULATIONSYMETRY.
 
-% Corban Swain, June 2023
+% Corban Swain, January 2024
 
 VERSION = 'v0.3.2';
 
@@ -251,17 +250,15 @@ if doDebug
     end
 end
 
-
 if interferenceBeatFreq >= carrierFreq
-    error('`%s` (%.1f) must be less than `%s` (%.1f).', ...
+    error('`%s` (%.3f) must be less than `%s` (%.3f).', ...
         INTERF_BEAT_FREQ_KEY, interferenceBeatFreq, ...
         CARRIER_FQ_KEY, carrierFreq);
 end
 
-
 if interferenceBeatFreq > (carrierFreq / 5)
-    warning(['The interf. beat frequency (%.1f Hz) should be much' ...
-        ' lower than the carrier frequency (%.1f Hz), consider' ...
+    warning(['The interf. beat frequency (%.3f Hz) should be much' ...
+        ' lower than the carrier frequency (%.3f Hz), consider' ...
         ' increasing the carrier frequency.'], interferenceBeatFreq, ...
         carrierFreq)
 end
@@ -271,14 +268,21 @@ pulsePeriod = 1 / pulseFreq;
 
 if fullPulseDuration > pulsePeriod
     error(['The pulse + ramp duration ' ...
-        '(%.1f + sum([%s], ''all'') = %.1f s) ' ...
+        '(%.3f + sum([%s], ''all'') = %.3f s) ' ...
         'must not be longer ' ...
-        'than 1 / pulseFreq (pulsePeriod = %.1f s)'], ...
-        pulseDuration, rampT, fullPulseDuration, pulsePeriod)
+        'than 1 / pulseFreq (pulsePeriod = %.3f s)'], ...
+        pulseDuration, num2str(rampT), fullPulseDuration, pulsePeriod)
 end
 
-interfCyclePeriod = 1 / interferenceBeatFreq;
-
+maxRecommendCarrierFreq = (sampRate / 2.3) - interferenceBeatFreq;
+if carrierFreq > maxRecommendCarrierFreq
+    warning(['With the given parameter configuration, the maximum' ...
+        ' recommended carrier frequency is %.3f Hz. However %.3f was' ...
+        ' passed for the carrier frequency. Consider decreasing the' ...
+        ' carrier frequency, increasing the sampling rate, or' ...
+        ' decreasing the interference beat frequency.'], ...
+        maxRecommendCarrierFreq);
+end
 
 %% Computed Values
 % fullPulseDuration = sum(rampT, 'all') + pulseDuration;
@@ -286,7 +290,6 @@ interfCyclePeriod = 1 / interferenceBeatFreq;
 sampPeriod = 1 / sampRate;
 breakT = pulsePeriod - fullPulseDuration;
 noBreak = breakT < eps();
-% noPulse = fullPulseDuration < eps();
 breakCarrierFreq = 0;
 if noBreak
     modT = 0;
@@ -335,20 +338,8 @@ if ~doControl
     % during the break the signals must be perfectly out of phase;
     % that is 180 deg or pi rad of phase offset.
     breakPO = 0;
-    
-    % pulsePODelta is chosen such that at the end of the frequency
-    % modulation the modulated signal will be at the phase offset
-    % location corresponding to where the phase offset would be for a
-    % pulse beginning at pi phase offset with no frequency modulation
-    % (i.e. an abrupt frequency and phase step). This allows the "duty
-    % cycle" modified pulse to mimic a non duty cycle modified pulse
-    % (given the same pulse-carrierFrequency difference, which--as an
-    % aside--is not the same as having the same pulse frequency).
-    pulsePODelta = -1 * wrapToPi(interferenceBeatFreq * 2 * pi * modT);
-    
-    targetPulseStartPO = pi;
-    % pulsePO = wrapToPi(pulsePODelta + targetPulseStartPO);
-    pulsePO = targetPulseStartPO;
+
+    pulsePO = pi;
 
     basePOSteps = [repmat([breakPO, pulsePO], [1, pulsesPerTrain]), ... 
         breakPO];
@@ -475,7 +466,6 @@ for iSignal = 1:numSignals
 end
 waveforms = waveforms .* [amp1, amp2];
 
-
 %% Generate Sequential Pulse Trains
 numInterTrainIntervals = numTrains - 1;
 if numInterTrainIntervals > 0
@@ -501,7 +491,6 @@ if numInterTrainIntervals > 0
     timeArray = colon(0, (numSamples - 1))' * sampPeriod;
     stimTimeArray = timeArray;
 end
-
 
 %% Add Wait Before and After Stimulus
 preWaitLength = ceil(waitT(1) / sampPeriod);
@@ -756,7 +745,7 @@ end
 
 %% Apply Flipping
 if doFlip
-    waveforms = waveforms .* [-1, 1];
+    waveforms = waveforms .* [-1, 1];  
 end
 
 %% Format Outputs

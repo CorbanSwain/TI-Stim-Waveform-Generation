@@ -109,7 +109,7 @@ function [waveforms, varargout] = createTIStimWaveforms(duration, ...
 
 % Corban Swain, June 2023
 
-VERSION = 'v0.2.1';
+VERSION = 'v0.2.2';
 
 %% Input Handling
 isNumericScalar = @(x) isnumeric(x) && isscalar(x);
@@ -122,6 +122,9 @@ isNonNegativeVecWithLen = @(x, lengths) isnumeric(x) && (all(x >=0)) ...
 p = inputParser();
 p.addRequired('Duration', isNonNegativeScalar);
 p.addRequired('CarrierFreq', isPositiveScalar);
+% TODO - refactor function to use interferenceBeatFreq rather than
+%   pulseFreq ... simply renaming and updating the documentation and
+%   function calls.
 p.addRequired('PulseFreq', isPositiveScalar);
 p.addParameter('SamplingRate', 100e3, isPositiveScalar);
 p.addParameter('DutyCycle', 1, @(x) isNonNegativeScalar(x) && (x <= 1));
