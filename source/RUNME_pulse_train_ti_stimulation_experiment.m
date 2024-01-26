@@ -19,7 +19,7 @@ inputSpecification = {
     'RampDuration', 0.003 % seconds
 
     % The frequency of pulses in the stimulation 
-    % (note this is NOT the interference pattern frequency).
+    % (note this is NOT the interference beat frequency).
     'PulseFreq', 20 % hertz
 
     % The numbner of pulses within a pulse train.
@@ -53,7 +53,7 @@ inputSpecification = {
     'Flip', false % (true/false)    
 
     % The duration of time [before, after] the stimulation starts 
-    % pre-stimulation time) in s.
+    % (pre- & post-stimulation time) in s.
     'WaitTime', 1 % seconds    
     
     % Controls which signals are modulated to produce the stimulation
