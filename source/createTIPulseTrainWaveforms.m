@@ -132,7 +132,7 @@ p.addRequired(PPT_KEY, isPositiveIntegerScalar);
 CARRIER_FQ_KEY = 'CarrierFreq';
 p.addRequired(CARRIER_FQ_KEY, isPositiveScalar); % hertz
 INTERF_BEAT_FREQ_KEY = 'InterferenceBeatFreq';
-p.addRequired(INTERF_BEAT_FREQ_KEY, isPositiveScalar);
+p.addRequired(INTERF_BEAT_FREQ_KEY, isPositiveScalar); % hertz
 
 NUM_TRAIN_KEY = 'NumTrains';
 p.addParameter(NUM_TRAIN_KEY, 1, isPositiveIntegerScalar);
