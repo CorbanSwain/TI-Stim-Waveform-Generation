@@ -11,12 +11,12 @@ inputSpecification = {
     % The duration of each stimulation pulse in s. This value must be less 
     % than 1 / PulseFrequency. Duty cycle can be computed by:
     % dutyFraction = PulseDuration * PulseFrequency.
-    'PulseDuration', 0.003 % seconds
+    'PulseDuration', 0.01 % seconds
 
     % The duration of the ramp-[up, down] period of each pulses in s,
     % i.e., the time for the signals to gradually increase from 0 to their
     % full amplitude and decrease from full amplitude to 0.
-    'RampDuration', 0.003 % seconds
+    'RampDuration', 0.0025 % seconds
 
     % The frequency of pulses in the stimulation 
     % (note this is NOT the interference beat frequency).
@@ -30,14 +30,14 @@ inputSpecification = {
 
     % The frequency in Hz of the interference pattern for each stimulation
     % pulse.
-    'InterferenceBeatFreq', 100 % hertz
+    'InterferenceBeatFreq', 200 % hertz
 
     % The number of pulse trains to perform in a single run.
     'NumTrains', 3
 
     % The amount of time in seconds to take between subsequent pulse 
     % trains.
-    'InterTrainInterval', 1.5 % seconds      
+    'InterTrainInterval', 0.5 % seconds      
     
     % The amplitude of the first signal, S1.
     'A1', 1 % volts
@@ -54,7 +54,7 @@ inputSpecification = {
 
     % The duration of time [before, after] the stimulation starts 
     % (pre- & post-stimulation time) in s.
-    'WaitTime', 1 % seconds    
+    'WaitTime', 0.5 % seconds    
     
     % Controls which signals are modulated to produce the stimulation
     % pulses. Valid values:
