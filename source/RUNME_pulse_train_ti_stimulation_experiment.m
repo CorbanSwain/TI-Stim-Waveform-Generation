@@ -53,7 +53,7 @@ inputSpecification = {
     'Flip', false % (true/false)    
 
     % The duration of time [before, after] the stimulation starts 
-    % (pre- & post-stimulation time) in s.
+    % (pre- & post-stimulation time) in s added to the experiment.
     'WaitTime', 0.5 % seconds    
     
     % Controls which signals are modulated to produce the stimulation
@@ -83,7 +83,7 @@ fprintf('Set Parameters for stimulation:\n')
 numArgs = size(inputSpecification, 1);
 for iArg = 1:numArgs
     [name, value] = inputSpecification{iArg, :};            
-    fprintf('%20s = %-14s\n', name, utils.toStr(value));
+    fprintf('%24s = %-14s\n', name, utils.toStr(value));
 end
 paramStruct = ...
     cell2struct(inputSpecification(:, 2), inputSpecification(:, 1));
