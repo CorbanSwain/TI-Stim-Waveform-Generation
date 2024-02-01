@@ -137,7 +137,7 @@ if newDaqApi
 else
     deviceTriggerSession = daq.createSession(vendorID);
     addDigitalChannel(...
-        deviceTriggerSession,'Dev2', devTriggerLines, 'Outputonly');
+        deviceTriggerSession, deviceName, devTriggerLines, 'Outputonly');
 end
 
 % create laser triggering daq session
@@ -148,7 +148,7 @@ if newDaqApi
     laserDAQ.addoutput(deviceName, laserLine, 'Digital');
 else
     laserSession = daq.createSession(vendorID);
-    addDigitalChannel(laserSession,'Dev2', laserLine, 'OutputOnly');
+    addDigitalChannel(laserSession, deviceName, laserLine, 'OutputOnly');
 end
 
 % create stimulation daq session
