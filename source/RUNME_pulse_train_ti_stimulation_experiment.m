@@ -11,19 +11,19 @@ inputSpecification = {
     % The duration of each stimulation pulse in s. This value must be less 
     % than 1 / PulseFrequency. Duty cycle can be computed by:
     % dutyFraction = PulseDuration * PulseFrequency.
-    'PulseDuration', 0.01 % seconds
+    'PulseDuration', 3/200 % seconds
 
     % The duration of the ramp-[up, down] period of each pulses in s,
     % i.e., the time for the signals to gradually increase from 0 to their
     % full amplitude and decrease from full amplitude to 0.
-    'RampDuration', 0.0025 % seconds
+    'RampDuration', 1/200 % seconds
 
     % The frequency of pulses in the stimulation 
     % (note this is NOT the interference beat frequency).
-    'PulseFreq', 20 % hertz
+    'PulseFreq', 1 % hertz
 
     % The numbner of pulses within a pulse train.
-    'PulsesPerTrain', 10
+    'PulsesPerTrain', 90
 
     % The carrier frequency of the signals in Hz.
     'CarrierFreq', 2000 % hertz
@@ -33,7 +33,7 @@ inputSpecification = {
     'InterferenceBeatFreq', 200 % hertz
 
     % The number of pulse trains to perform in a single run.
-    'NumTrains', 3
+    'NumTrains', 1
 
     % The amount of time in seconds to take between subsequent pulse 
     % trains.
@@ -93,6 +93,8 @@ fprintf('---\n')
 fprintf('Running waveform generation function...\n');
 [waveforms, ~, usedParamStruct] = createTIPulseTrainWaveforms(paramStruct);
 fprintf('Waveforms sucessfully generated.\n');
+
+error('Ending Prematurely ... remove this line of code.')
 
 %% 3. Run Stimulation Experiment Sequence on NIDAQ
 fprintf('---\n')

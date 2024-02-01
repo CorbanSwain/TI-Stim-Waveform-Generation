@@ -154,6 +154,10 @@ p.addParameter(DO_FLIP_KEY, false, isLogicalScalar);
 WAIT_TIME_KEY = 'WaitTime';
 p.addParameter(WAIT_TIME_KEY, 0.5, ... % seconds
     @(x) isNonNegativeVecWithLen(x, [1, 2]));
+DO_BRUTE_FORCE_KEY = 'auto';
+p.addParameter(DO_BRUTE_FORCE_KEY, false, ...
+    @(x) isLogicalScalar(x) ...
+    || (utils.scalarStringLike(x) && strcmpi(x, 'auto')));
 DO_CONTROL_KEY = 'Control';
 p.addParameter(DO_CONTROL_KEY, false, isLogicalScalar);
 DO_PLOT_KEY = 'Plot';
@@ -231,6 +235,7 @@ doFlip = inputs.(DO_FLIP_KEY);
 waitT = inputs.WaitTime(:)' .* [1, 1];
 parameters.WaitTime = waitT;
 
+doBruteForce = inputs.(DO_BRUTE_FORCE_KEY);
 doControl = inputs.(DO_CONTROL_KEY);
 doPlot = inputs.(DO_PLOT_KEY);
 doDebug = inputs.(DO_DEBUG_KEY);
@@ -766,5 +771,3 @@ switch nargout
         varargout = {};
 end
 end
-
-
