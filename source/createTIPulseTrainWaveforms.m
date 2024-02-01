@@ -15,9 +15,10 @@ function [waveforms, varargout] = createTIPulseTrainWaveforms( ...
 %   The ramp specified by rampDuration linearly ramps the stimulation 
 %   amplitudes from 0 to amp1 and amp2 over rampT(1) seconds at the 
 %   beginning of each pulse and from amp1 and amp2 to 0 over rampT(2) 
-%   seconds at the end of each pulse. Where rampT = rampDuration .* [1, 1].
-%   To specify different values for the ramp up time (1) and ramp down time
-%   (2), supply a 2-element vector for this parameter.
+%   seconds at the end of each pulse. Where 
+%   rampT = rampDuration(:)' .* [1, 1]. To specify different values for 
+%   the ramp up time (1) and ramp down time (2), supply a 2-element vector 
+%   for this parameter.
 %
 %   createTIPulseTrainWaveforms(__, 'NumTrains', numTrains)
 %   {numTrains=1} Produces waveforms which repeats the stimulation 
@@ -69,10 +70,11 @@ function [waveforms, varargout] = createTIPulseTrainWaveforms( ...
 %   seconds. To specify different values for the ramp up time (1) and ramp 
 %   down time (2), supply a 2-element vector for this parameter.
 % 
-%   createTIPulseTrainWaveforms(__, 'WaitTime', waitT) {waitT=0.1} Adds a 
-%   period of no stimulation before (1) and after (2) the stimulation 
-%   period in seconds. To specify different values for the pre-stimulation
-%   wait and the post-stimulation wait, supply a 2-element vector for this
+%   createTIPulseTrainWaveforms(__, 'WaitTime', waitSpec) {waitSpec=0.1}
+%   Adds a period of no stimulation before waitT(1) and after waitT(2) the
+%   stimulation period in seconds; where waitT = waitSpec(:)' * [1, 1]. To
+%   specify different values for the pre-stimulation wait and the
+%   post-stimulation wait, supply a 2-element vector for the waitSpec
 %   parameter (similar to rampDuration).
 %
 %   The ramp occurs at the beginning and end of every pulse WITHIN the 
@@ -132,7 +134,7 @@ p.addRequired(PPT_KEY, isPositiveIntegerScalar);
 CARRIER_FQ_KEY = 'CarrierFreq';
 p.addRequired(CARRIER_FQ_KEY, isPositiveScalar); % hertz
 INTERF_BEAT_FREQ_KEY = 'InterferenceBeatFreq';
-p.addRequired(INTERF_BEAT_FREQ_KEY, isPositiveScalar);
+p.addRequired(INTERF_BEAT_FREQ_KEY, isPositiveScalar); % hertz
 
 NUM_TRAIN_KEY = 'NumTrains';
 p.addParameter(NUM_TRAIN_KEY, 1, isPositiveIntegerScalar);
@@ -606,11 +608,11 @@ if doPlot
     s2Color = [55, 126, 184] / 255;
     sumColor = [77, 175, 74] / 255;    
 
-    f = figure('Name', 'TI Stimulation Summary Plots');    
+    f = figure('Name', 'TI Pulse Train Summary Plots');    
     plotArgs = {'-', 'LineWidth', 2};
     if ~useSubplot
         t = tiledlayout('vertical');
-        title(t, 'TI Stimulation Waveforms and Frequency Summary');
+        title(t, 'TI Pulse Train Waveforms and Frequency Summary');
         t.TileSpacing = 'compact';
         t.Padding = 'compact';
     end
@@ -746,6 +748,12 @@ end
 %% Apply Flipping
 if doFlip
     waveforms = waveforms .* [-1, 1];  
+end
+
+%% Check Output
+if any(isnan(waveforms), 'all')
+    warning(['NaN value(s) found in output waveforms; an unexpected' ...
+        ' error has occured.'])
 end
 
 %% Format Outputs
