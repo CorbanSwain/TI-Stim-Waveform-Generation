@@ -125,7 +125,7 @@ p.addRequired('CarrierFreq', isPositiveScalar);
 % TODO - refactor function to use interferenceBeatFreq rather than
 %   pulseFreq ... simply renaming and updating the documentation and
 %   function calls.
-p.addRequired('PulseFreq', isPositiveScalar);
+p.addRequired('PulseFreq', isNonNegativeScalar);
 p.addParameter('SamplingRate', 100e3, isPositiveScalar);
 p.addParameter('DutyCycle', 1, @(x) isNonNegativeScalar(x) && (x <= 1));
 p.addParameter('A1', 1, isNonNegativeScalar);
@@ -441,6 +441,8 @@ end
 waveforms = waveforms .* [amp1, amp2];
 
 %% Display Plots
+% TDOD - code duplication between this and the pulse train script consider
+%    consilidating into a utility function
 if doPlot
     useSubplot = verLessThan('matlab', '9.7');
     compWaveform = sum(waveforms, 2);
@@ -537,7 +539,7 @@ if doPlot
     hold(ax1, 'on');
     plot(timeArray, waveforms(:, 1), plotArgs{:}, 'Color', s1Color);
     ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * amp1 * 1.1);
+    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp1) * 1.1);
     xlim([-waitT(1), duration + waitT(2)]);
     box('off');
     grid('on');
@@ -551,7 +553,7 @@ if doPlot
     hold(ax2, 'on');
     plot(timeArray, waveforms(:, 2), plotArgs{:}, 'Color', s2Color);
     ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * amp2 * 1.1);
+    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp2) * 1.1);
     xlim([-waitT(1), duration + waitT(2)]);
     box('off');
     grid('on');
@@ -568,8 +570,8 @@ if doPlot
     end
     hold(ax3, 'on');
     plot(timeArray, compWaveform, plotArgs{:}, 'Color', sumColor);
-    ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * (amp1 + amp2) * 1.1);
+    ylabel('Amplitude (a.u.)');    
+    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp1 + amp2) * 1.1);
     xlim([-waitT(1), duration + waitT(2)]);
     box('off');
     grid('on');

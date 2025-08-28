@@ -134,7 +134,7 @@ p.addRequired(PPT_KEY, isPositiveIntegerScalar);
 CARRIER_FQ_KEY = 'CarrierFreq';
 p.addRequired(CARRIER_FQ_KEY, isPositiveScalar); % hertz
 INTERF_BEAT_FREQ_KEY = 'InterferenceBeatFreq';
-p.addRequired(INTERF_BEAT_FREQ_KEY, isPositiveScalar); % hertz
+p.addRequired(INTERF_BEAT_FREQ_KEY, isNonNegativeScalar); % hertz
 
 NUM_TRAIN_KEY = 'NumTrains';
 p.addParameter(NUM_TRAIN_KEY, 1, isPositiveIntegerScalar);
@@ -154,6 +154,10 @@ p.addParameter(DO_FLIP_KEY, false, isLogicalScalar);
 WAIT_TIME_KEY = 'WaitTime';
 p.addParameter(WAIT_TIME_KEY, 0.5, ... % seconds
     @(x) isNonNegativeVecWithLen(x, [1, 2]));
+DO_BRUTE_FORCE_KEY = 'auto';
+p.addParameter(DO_BRUTE_FORCE_KEY, false, ...
+    @(x) isLogicalScalar(x) ...
+    || (utils.scalarStringLike(x) && strcmpi(x, 'auto')));
 DO_CONTROL_KEY = 'Control';
 p.addParameter(DO_CONTROL_KEY, false, isLogicalScalar);
 DO_PLOT_KEY = 'Plot';
@@ -231,6 +235,7 @@ doFlip = inputs.(DO_FLIP_KEY);
 waitT = inputs.WaitTime(:)' .* [1, 1];
 parameters.WaitTime = waitT;
 
+doBruteForce = inputs.(DO_BRUTE_FORCE_KEY);
 doControl = inputs.(DO_CONTROL_KEY);
 doPlot = inputs.(DO_PLOT_KEY);
 doDebug = inputs.(DO_DEBUG_KEY);
@@ -630,7 +635,7 @@ if doPlot
     hold(ax1, 'on');
     plot(timeArray, waveforms(:, 1), plotArgs{:}, 'Color', s1Color);
     ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * amp1 * 1.1);
+    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp1) * 1.1);
     xlim([timeArray(1), timeArray(end)]);
     box('off');
     grid('on');
@@ -644,7 +649,7 @@ if doPlot
     hold(ax2, 'on');
     plot(timeArray, waveforms(:, 2), plotArgs{:}, 'Color', s2Color);
     ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * amp2 * 1.1);
+    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp2) * 1.1);
     xlim([timeArray(1), timeArray(end)]);
     box('off');
     grid('on');
@@ -662,7 +667,7 @@ if doPlot
     hold(ax3, 'on');
     plot(timeArray, compWaveform, plotArgs{:}, 'Color', sumColor);
     ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * (amp1 + amp2) * 1.1);
+    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp1 + amp2) * 1.1);
     xlim([timeArray(1), timeArray(end)]);
     box('off');
     grid('on');
@@ -692,6 +697,9 @@ if doPlot
     deltaLogF = log(maxIF) - log(minIF);
     if exp(deltaLogF) <= (1 + 1e-6)
         ylm = ([-1, 1] + [minIF, maxIF]);
+    elseif isinf(deltaLogF)
+        rnge = maxIF - minIF;
+        ylm = [minIF, maxIF] + ([-1, 1] * rnge * 0.05);
     else
         lgylm = [log(minIF), log(maxIF)] + (deltaLogF * 0.1 * [-1, 1]);
         ylm = exp(lgylm); 
@@ -766,5 +774,3 @@ switch nargout
         varargout = {};
 end
 end
-
-

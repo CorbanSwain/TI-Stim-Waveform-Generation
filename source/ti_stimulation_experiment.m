@@ -100,10 +100,10 @@ fprintf('Preparing to run system control sequence for stimulation...\n');
 preDeviceDelay = 1;
 
 % delay between device trigger and stimulation start (s)
-preStimulationDelay = 0.1;
+preStimulationDelay = 0;
 
 % delay between stimulation stop and laser off (s)
-postStimulaionDelay = 1;
+postStimulaionDelay = 0;
 
 % DAQ device name
 deviceName = 'Dev2';
@@ -135,7 +135,7 @@ if newDaqApi
 else
     deviceTriggerSession = daq.createSession(vendorID);
     addDigitalChannel(...
-        deviceTriggerSession,'Dev2', devTriggerLines, 'Outputonly');
+        deviceTriggerSession, deviceName, devTriggerLines, 'Outputonly');
 end
 
 % create laser triggering daq session
@@ -146,7 +146,7 @@ if newDaqApi
     laserDAQ.addoutput(deviceName, laserLine, 'Digital');
 else
     laserSession = daq.createSession(vendorID);
-    addDigitalChannel(laserSession,'Dev2', laserLine, 'OutputOnly');
+    addDigitalChannel(laserSession, deviceName, laserLine, 'OutputOnly');
 end
 
 % create stimulation daq session
@@ -223,7 +223,8 @@ fprintf('---\n\nDONE, Experiment Run Complete!\n\n');
 
 %%% Cleanup
 % make sure session variables are destroyed
-clear('laserIO', 'stimIO', 'deviceTriggerIO');
+clear('laserIO', 'stimIO', 'deviceTriggerIO', 'daqSingleOutput', ...
+    'daqForegroundOutput');
 if newDaqApi
     clear('laserDAQ', 'stimDAQ', 'deviceTriggerDAQ');
 else
