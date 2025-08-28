@@ -11,26 +11,26 @@ inputSpecification = {
     % The duration of each stimulation pulse in s. This value must be less 
     % than 1 / PulseFrequency. Duty cycle can be computed by:
     % dutyFraction = PulseDuration * PulseFrequency.
-    'PulseDuration', 3/200 % seconds
+    'PulseDuration', 5/10 % seconds
 
     % The duration of the ramp-[up, down] period of each pulses in s,
     % i.e., the time for the signals to gradually increase from 0 to their
     % full amplitude and decrease from full amplitude to 0.
-    'RampDuration', 1/200 % seconds
+    'RampDuration', 1/10 % seconds
 
     % The frequency of pulses in the stimulation 
     % (note this is NOT the interference beat frequency).
     'PulseFreq', 1 % hertz
 
     % The numbner of pulses within a pulse train.
-    'PulsesPerTrain', 90
+    'PulsesPerTrain', 3
 
     % The carrier frequency of the signals in Hz.
     'CarrierFreq', 2000 % hertz
 
     % The frequency in Hz of the interference pattern for each stimulation
     % pulse.
-    'InterferenceBeatFreq', 200 % hertz
+    'InterferenceBeatFreq', 10 % hertz
 
     % The number of pulse trains to perform in a single run.
     'NumTrains', 1
@@ -40,7 +40,7 @@ inputSpecification = {
     'InterTrainInterval', 0.5 % seconds      
     
     % The amplitude of the first signal, S1.
-    'A1', 1 % volts
+    'A1', 0 % volts
     
     % The amplitude of the second signal, S2.
     'A2', 1 % volts
@@ -94,8 +94,6 @@ fprintf('Running waveform generation function...\n');
 [waveforms, ~, usedParamStruct] = createTIPulseTrainWaveforms(paramStruct);
 fprintf('Waveforms sucessfully generated.\n');
 
-error('Ending Prematurely ... remove this line of code.')
-
 %% 3. Run Stimulation Experiment Sequence on NIDAQ
 fprintf('---\n')
 fprintf('Preparing to run system control sequence for stimulation...\n');
@@ -104,10 +102,10 @@ fprintf('Preparing to run system control sequence for stimulation...\n');
 preDeviceDelay = 1;
 
 % delay between device trigger and stimulation start (s)
-preStimulationDelay = 0.1;
+preStimulationDelay = 0;
 
 % delay between stimulation stop and laser off (s)
-postStimulaionDelay = 1;
+postStimulaionDelay = 0;
 
 % DAQ device name
 deviceName = 'Dev2';
@@ -227,7 +225,8 @@ fprintf('---\n\nDONE, Experiment Run Complete!\n\n');
 
 %%% Cleanup
 % make sure session variables are destroyed
-clear('laserIO', 'stimIO', 'deviceTriggerIO');
+clear('laserIO', 'stimIO', 'deviceTriggerIO', 'daqSingleOutput', ...
+    'daqForegroundOutput');
 if newDaqApi
     clear('laserDAQ', 'stimDAQ', 'deviceTriggerDAQ');
 else
