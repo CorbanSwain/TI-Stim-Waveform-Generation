@@ -1,6 +1,6 @@
 % Script for Configuring Stimulation, Generating Waveforms, and Running
 % TI **PULSE TRAIN** Stimulation Experiments
-% Corban Swain , June 2023 - January 2024
+% Corban Swain , June 2023 - August 2025
 
 %% 1. Get Inputs for Pulse Generation
 clear();
@@ -33,17 +33,24 @@ inputSpecification = {
     'InterferenceBeatFreq', 10 % hertz
 
     % The number of pulse trains to perform in a single run.
-    'NumTrains', 1
+    'NumTrains', 6
 
     % The amount of time in seconds to take between subsequent pulse 
     % trains.
-    'InterTrainInterval', 0.5 % seconds      
+    'InterTrainInterval', 10 % seconds      
     
-    % The amplitude of the first signal, S1.
-    'A1', 0 % volts
+    % The amplitude of the first signal, S1. This value can be supplied as
+    % a scalar or, if `NumTrains` > 1, a vector of length `NumTrains` where
+    % each value set's the amplitude of the pulse train at that index.
+    %   Examples:
+    %     - scalar: 'A1', 1 % volts
+    %     - vector: 'NumTrains', 4
+    %               'A1', [1, 3, 1, 3] % volts
+    'A1', [2, 4, 2, 4, 2, 4] % volts
     
-    % The amplitude of the second signal, S2.
-    'A2', 1 % volts
+    % The amplitude of the second signal, S2. This value can be a scalar or
+    % vector as described for the `A1` parameter.
+    'A2', [4, 2, 4, 2, 4, 2] % volts
 
     % The sampling rate in Hz used for generating the signals.
     'SamplingRate', 200e3 % hertz    
