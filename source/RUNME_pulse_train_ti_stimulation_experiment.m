@@ -4,6 +4,7 @@
 
 %% 1. Get Inputs for Pulse Generation
 clear();
+VERSION = 'v0.4.1';
 
 % template for inputs
 % input name | value
@@ -40,17 +41,35 @@ inputSpecification = {
     'InterTrainInterval', 10 % seconds      
     
     % The amplitude of the first signal, S1. This value can be supplied as
-    % a scalar or, if `NumTrains` > 1, a vector of length `NumTrains` where
-    % each value set's the amplitude of the pulse train at that index.
+    % a scalar or a vector for which each value sets the amplitude of the
+    % pulse train at that index. AmpVecMode controls exactly how vectors
+    % passed are handled.
     %   Examples:
-    %     - scalar: 'A1', 1 % volts
-    %     - vector: 'NumTrains', 4
-    %               'A1', [1, 3, 1, 3] % volts
-    'A1', [2, 4, 2, 4, 2, 4] % volts
+    %       Scalar Example: 
+    %           'A1', 1; 'A2', 2
+    %       Vector Example with AmpVecMode 'exact':
+    %           'NumTrains', 3
+    %           'A1', [1, 3, 1]; 'A2', [3, 1, 3] 
+    %           'AmpVecMode', 'exact'
+    %       Vector Example with AmpVecMode 'repeat':
+    %           'NumTrains', 4
+    %           'A1', [1, 2]; 'A2', [2, 1, 0]
+    %           'AmpVecMode', 'repeat'
+    %           A1 will be automatically expanded to [1, 2, 1, 2]
+    %           A2 will be automatically expanded to [2, 1, 0, 2]
+    'A1', [2, 4] % volts
     
     % The amplitude of the second signal, S2. This value can be a scalar or
-    % vector as described for the `A1` parameter.
-    'A2', [4, 2, 4, 2, 4, 2] % volts
+    % vector as described for the A1 parameter.
+    'A2', [4, 2, 4, 2, 4, 2] % volts   
+
+    % Controls how a vector passed for A1 or A2 is handled. Valid values 
+    % are:
+    %   - 'exact'  : A1 or A2 be scalar or have length NumTrains.
+    %   - 'repeat' : A1 and A2 can be vectors of any length and the 
+    %                amplitude modulation pattern will be repeated
+    %                (and/or truncated) until the last train is reached.
+    'AmpVecMode', 'repeat'
 
     % The sampling rate in Hz used for generating the signals.
     'SamplingRate', 200e3 % hertz    
@@ -79,13 +98,20 @@ inputSpecification = {
     'Control', false % (true/false)
     
     % A flag to plot a summary of the output signals.
-    'Plot', true % (true/false)
+    'Plot', true % (true/false)    
     
     % A flag to run the code in debug mode.
     'Debug', false % (true/false)    
     };
 
 % let's create a loop for printing values for each of these inputs
+if verLessThan('matlab', '25.1')
+    datetext = datestr(now());
+else
+    datetext = datetime('now');
+end
+fprintf('\n------ Running TI Stim. Script on %s (%s) -------\n', ...
+    datetext, VERSION);
 fprintf('Set Parameters for stimulation:\n')
 numArgs = size(inputSpecification, 1);
 for iArg = 1:numArgs
@@ -100,6 +126,11 @@ fprintf('---\n')
 fprintf('Running waveform generation function...\n');
 [waveforms, ~, usedParamStruct] = createTIPulseTrainWaveforms(paramStruct);
 fprintf('Waveforms sucessfully generated.\n');
+
+totalDuration = duration(0, 0, ...
+    size(waveforms, 1) ./ usedParamStruct.SamplingRate);
+totalDuration.Format = 'mm:ss.SSS';
+fprintf('Stimulation duration is approx %s min:sec.\n', totalDuration);
 
 %% 3. Run Stimulation Experiment Sequence on NIDAQ
 fprintf('---\n')
