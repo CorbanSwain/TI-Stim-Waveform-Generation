@@ -38,10 +38,8 @@ This script will:
 open `source/RUNME_pulse_train_ti_stimulation_experiment.m` in MATLAB and edit the
 `inputSpecification` section directly before running.
 
-### Example: Updating Parameters
-To increase the pulse frequency from 1 Hz to 5 Hz,
-find the inputSpecification section and update:
-
+For example to increase the pulse frequency from 1 Hz to 5 Hz,
+find the `inputSpecification` cell array section and update:
 ```matlab
 % The frequency of pulses in the stimulation (Hz)
 'PulseFreq', 1   % original
@@ -79,9 +77,9 @@ The most important parameters are:
 | `Debug`                | boolean          | –     | Enable debug mode with extra logging.                                          |
 
 The function returns:
-- waveforms: generated stimulation waveforms (matrix, samples × channels)
-- t: time vector for the generated signals
-- params: parameter struct actually used in generation
+- `waveforms`: generated stimulation waveforms (matrix, samples × channels)
+- `t`: time vector for the generated signals
+- `params`: parameter struct actually used in generation
 
 ## Output
 Running an experiment produces:
