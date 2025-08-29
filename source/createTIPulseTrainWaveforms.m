@@ -37,13 +37,31 @@ function [waveforms, varargout] = createTIPulseTrainWaveforms( ...
 %
 %   createTIPulseTrainWaveforms(__, 'A1', amp1, 'A2', amp2) 
 %   {amp1=1, amp2=1} Sets the amplitude of each waveform in arbitrairy 
-%   units. This value can be supplied as a scalar or, if numTrains > 1, 
-%   a vector of length numTrains where each value in the vector set's 
-%   the amplitude of the respective signal pulse train at that index.
+%   units. This value can be supplied as a scalar or a vector, the value
+%   for ampVecMode determine how vector values are handled and applied to
+%   modulate each pulse train.
 %       Scalar Example: 
-%           (..., 'A1', 1, 'A2', 2, ...)
-%       Vector Example:
-%           (..., 'NumTrains', 3, 'A1', [1, 3, 1], 'A2', [3, 1, 3], ...)
+%           (__, 'A1', 1, 'A2', 2, ...)
+%       Vector Example with ampVecMode = 'exact':
+%           (__, 'NumTrains', 3, 'A1', [1, 3, 1], 'A2', [3, 1, 3], 
+%            'AmpVecMode', 'exact')
+%       Vector Example with ampVecMode = 'repeat':
+%           (__, 'NumTrains', 4, 'A1', [1, 2], 'A2', [2, 1, 0],
+%            'AmpVecMode', 'repeat')
+%           amp1 will be expanded to [1, 2, 1, 2]
+%           amp2 will be expanded to [2, 1, 0, 2]
+%
+%   createTIPulseTrainWaveforms(__, 'AmpVecMode', ampVecMode) 
+%   {ampVecMode='exact'} Determines the behavior when a vector is passed
+%   for either amp1 or amp2 as follows:
+%       - 'exact'  : If non-scalar vectors, amp1 and amp2 must have length 
+%                    numTrains.
+%       - 'repeat' : amp1 and amp2 can be vectors of any length and the 
+%                    amplidude modulation pattern will be repeated
+%                    (and/or truncated) until the last train is reached.
+%
+%   ampVecMode must be a valid member or initializer of the
+%   UTILS.AMPLITUDEVECTORMODE enumeration class.
 %
 %   createTIPulseTrainWaveforms(__, 'ModulationSymetry', symetry)
 %   {symetry='signal1'} symetry determines if:
@@ -98,6 +116,11 @@ function [waveforms, varargout] = createTIPulseTrainWaveforms( ...
 %   is true a preview of the stimulation waveforms and their sum will be
 %   displayed in a plot.
 %
+%   createTIPulseTrainWaveforms(__, 'OptimizePlot', doOptimizePlot) 
+%   {doOptimizePlot=true} If doOptimizePlot is true then the plots, 
+%   if generated, will be resampled to ~16x the max frequency or sampRate, 
+%   whichever is lower.
+%
 %   createTIPulseTrainWaveforms(__, 'Debug', doDebug) {doDebug=false} will 
 %   run the waveform creation code in debug mode if doDebug is true.
 %
@@ -113,11 +136,11 @@ function [waveforms, varargout] = createTIPulseTrainWaveforms( ...
 %   using the provided parameters struct.
 %
 %   See also CREATETISTIMWAVEFORMS, UTILS.GENERATEFMPHASEFCN, 
-%       UTILS.MODULATIONSYMETRY.
+%       UTILS.MODULATIONSYMETRY, UTILS.AMPLITUDEVECTORMODE.
 
 % Corban Swain, August 2025
 
-VERSION = 'v0.4.0';
+VERSION = 'v0.4.1';
 
 %% Input Handling
 isNumericScalar = @(x) isnumeric(x) && isscalar(x);
@@ -153,6 +176,9 @@ A1_KEY = 'A1';
 p.addParameter(A1_KEY, 1, isNonNegativeVector);
 A2_KEY = 'A2';
 p.addParameter(A2_KEY, 1, isNonNegativeVector);
+AMP_VEC_MODE_KEY = 'AmpVecMode';
+p.addParameter(AMP_VEC_MODE_KEY, 'exact', ...
+    @utils.AmplitudeVectorMode.isMember);
 MOD_SYM_KEY = 'ModulationSymetry';
 p.addParameter(MOD_SYM_KEY, 'signal1', ...
     @utils.ModulationSymetry.isMember);
@@ -169,6 +195,8 @@ DO_CONTROL_KEY = 'Control';
 p.addParameter(DO_CONTROL_KEY, false, isLogicalScalar);
 DO_PLOT_KEY = 'Plot';
 p.addParameter(DO_PLOT_KEY, true, isLogicalScalar);
+DO_OPT_PLOT_KEY = 'OptimizePlot';
+p.addParameter(DO_OPT_PLOT_KEY, true, isLogicalScalar);
 DO_DEBUG_KEY = 'Debug';
 p.addParameter(DO_DEBUG_KEY, false, isLogicalScalar);
 
@@ -233,6 +261,7 @@ interTrainInterval = inputs.(ITI_KEY);
 sampRate = inputs.(SAMP_RATE_KEY);
 amp1 = inputs.(A1_KEY);
 amp2 = inputs.(A2_KEY);
+ampVecMode = utils.AmplitudeVectorMode(inputs.(AMP_VEC_MODE_KEY));
 
 symetry = utils.ModulationSymetry(inputs.(MOD_SYM_KEY));
 parameters.(MOD_SYM_KEY) = symetry;
@@ -244,6 +273,7 @@ parameters.WaitTime = waitT;
 
 doControl = inputs.(DO_CONTROL_KEY);
 doPlot = inputs.(DO_PLOT_KEY);
+doOptimizePlot = inputs.(DO_OPT_PLOT_KEY);
 doDebug = inputs.(DO_DEBUG_KEY);
 
 fmArgs = {};
@@ -287,22 +317,25 @@ if fullPulseDuration > pulsePeriod
         pulseDuration, num2str(rampT), fullPulseDuration, pulsePeriod)
 end
 
-% issue error if amp1 or amp2 vectors have improper length; valid
-% values must have a length of 1 (scalar) or numTrains
-if ~any(length(amp1) == [1, numTrains])
-    error(['`%s` must be a scalar or a vector with length `%s` (%d);' ...
-        ' instead recieved a vector of length %d. Update the value of' ...
-        ' either `%s` or `%s` to fix.'], ...
-        A1_KEY, NUM_TRAIN_KEY, numTrains, length(amp1), A1_KEY, ...
-        NUM_TRAIN_KEY);
+if ampVecMode == utils.AmplitudeVectorMode.EXACT
+    % issue error if amp1 or amp2 vectors have improper length; valid
+    % values must have a length of 1 (scalar) or numTrains
+    if ~any(length(amp1) == [1, numTrains])
+        error(['`%s` must be a scalar or a vector with length `%s`' ...
+            ' (%d); instead recieved a vector of length %d. Update the' ...
+            ' value of either `%s` or `%s` to fix.'], ...
+            A1_KEY, NUM_TRAIN_KEY, numTrains, length(amp1), A1_KEY, ...
+            NUM_TRAIN_KEY);
+    end
+    if ~any(length(amp2) == [1, numTrains])
+        error(['`%s` must be a scalar or a vector with length `%s`' ...
+            ' (%d); instead recieved a vector of length %d. Update the' ...
+            ' value of either `%s` or `%s` to fix.'], ...
+            A2_KEY, NUM_TRAIN_KEY, numTrains, length(amp2), A2_KEY, ...
+            NUM_TRAIN_KEY);
+    end
 end
-if ~any(length(amp2) == [1, numTrains])
-    error(['`%s` must be a scalar or a vector with length `%s` (%d);' ...
-        ' instead recieved a vector of length %d. Update the value of' ...
-        ' either `%s` or `%s` to fix.'], ...
-        A2_KEY, NUM_TRAIN_KEY, numTrains, length(amp2), A2_KEY, ...
-        NUM_TRAIN_KEY);
-end
+
 
 maxRecommendCarrierFreq = (sampRate / 2.3) - interferenceBeatFreq;
 if carrierFreq > maxRecommendCarrierFreq
@@ -347,10 +380,26 @@ refFreqSteps = [repmat([breakCarrierFreq, carrierFreq], ...
     [1, pulsesPerTrain]), breakCarrierFreq];   
 pulseSel = 2:2:numStepsPerTrain;
 
-% get amp1 and amp2 into a consistent format: a row vector with length
-% numTrains
-amp1 = ones([1, numTrains]) .* amp1(:)';
-amp2 = ones([1, numTrains]) .* amp2(:)';
+% make sure amp1 and amp2 are row vectors
+amp1 = amp1(:)';
+amp2 = amp2(:)';
+
+% handle 'repeat' case for ampVecMode; repeat and resize amplitude vectors
+if ampVecMode == utils.AmplitudeVectorMode.REPEAT
+    a1Reps = ceil(numTrains / length(amp1));
+    a2Reps = ceil(numTrains / length(amp2));
+    amp1 = repmat(amp1, 1, a1Reps);
+    amp2 = repmat(amp2, 1, a2Reps);
+    % trim vectore since original length may not have been a multiple of 
+    % numTrains
+    amp1 = amp1(:, 1:numTrains); 
+    amp2 = amp2(:, 1:numTrains);
+end
+
+% If amp1 or amp2 are scalars in 'exact' mode, multiply out to vector;
+% otherwise this step leavs amp1 and amp2 unchanged.
+amp1 = ones([1, numTrains]) .* amp1;
+amp2 = ones([1, numTrains]) .* amp2;
 
 if ~doControl
     %% Define Frequency Modulation Steps
@@ -587,19 +636,93 @@ end
 
 %% Display Plots
 if doPlot
-    useSubplot = verLessThan('matlab', '9.7');
-    compWaveform = sum(waveforms, 2);
-
     if doControl
         freqs = refFreqSteps;
     else
         freqs = stimFreqSteps;
     end
+
+    if doOptimizePlot
+        maxFreq = max(freqs, [], 'all');
+        nyquistBufferFreq = maxFreq * 16;
+        if nyquistBufferFreq < sampRate
+            rateRatio = round(sampRate / nyquistBufferFreq);
+            newPeriod = sampPeriod * rateRatio;
+            plotSampRate = 1 / newPeriod;
+            plotWaveforms = waveforms(1:rateRatio:end, :);
+            plotTimeArray = timeArray(1:rateRatio:end, :);
+            plotPhaseforms = phaseforms(1:rateRatio:end, :);
+            plotStimTimeArray = stimTimeArray(1:rateRatio:end, :);
+        else
+            % no optimization to perform
+            plotWaveforms = waveforms;
+            plotTimeArray = timeArray;
+            plotStimTimeArray = stimTimeArray;
+            plotPhaseforms = phaseforms;
+            plotSampRate = sampRate;
+        end
+    end
+    makePlots(...
+        plotWaveforms, ...
+        plotTimeArray, ...
+        doDebug, ...
+        doFlip, ...
+        freqs, ...
+        plotStimTimeArray, ...
+        plotPhaseforms, ...
+        totalTrainDuration, ...
+        plotSampRate, ...
+        amp1, ...
+        amp2, ...
+        parameters, ...
+        VERSION)
+end    
+
+%% Apply Flipping
+if doFlip
+    waveforms = waveforms .* [-1, 1];  
+end
+
+%% Check Output
+if any(isnan(waveforms), 'all')
+    warning(['NaN value(s) found in output waveforms; an unexpected' ...
+        ' error has occured.'])
+end
+
+%% Format Outputs
+switch nargout
+    case 2
+        varargout = {timeArray};
+    case 3
+        varargout = {timeArray, parameters};
+    otherwise
+        varargout = {};
+end
+end
+
+function makePlots(...
+    waveforms, ...
+    timeArray, ...
+    doDebug, ...
+    doFlip, ...
+    freqs, ...
+    stimTimeArray, ...
+    phaseforms, ...
+    totalTrainDuration, ...
+    sampRate, ...
+    amp1, ...
+    amp2, ...
+    parameters, ...
+    VERSION)
+
+    useSubplot = verLessThan('matlab', '9.7');
+    compWaveform = sum(waveforms, 2);
+
     maxF = max(freqs, [], 'all');
     minF = min(freqs, [], 'all');
 
     if doDebug
-        figure();
+        figure('Name', 'TI Pulse Train DEBUG Plots');
         if doFlip
             title('Phase Offset vs. Time Between (-1 * S1) and S2');
         else
@@ -615,7 +738,7 @@ if doPlot
         figure();
         
         spectArgs = {sampRate, 'spectrogram',...
-            'TimeResolution', sampPeriod * 1000 ...
+            'TimeResolution', 1/ sampRate * 1000 ...
             'OverlapPercent', 90, ...
             'Leakage', 0.5, ...
             'FrequencyLimits', [minF / 5, maxF * 2.5]};
@@ -666,9 +789,9 @@ if doPlot
         linkaxes([ax1, ax2, ax3], 'x'); 
     end
         
-    phaseTol = maxF * 2 * pi * sampPeriod * 1.05;
+    phaseTol = maxF * 2 * pi / sampRate * 1.05;
     instantFreqFcn = @(x) diff(unwrap(x, (2 * pi) - phaseTol, 1), 1, 1) ...
-        / sampPeriod / 2 / pi;
+        * sampRate / 2 / pi;
     instantFreq = instantFreqFcn(phaseforms);
 
     s1Color = [228, 26, 28] / 255;
@@ -810,7 +933,7 @@ if doPlot
     else
         datetext = datetime('now');
     end
-    
+
     str = sprintf('%s (Generated on %s, Version %s)', str, ...
         datetext, VERSION);
     curPos = f.Position;
@@ -824,26 +947,4 @@ if doPlot
         'VerticalAlignment', 'middle', 'Interpreter', 'none');
 
     linkaxes([ax1, ax2, ax3, ax4], 'x');       
-end
-
-%% Apply Flipping
-if doFlip
-    waveforms = waveforms .* [-1, 1];  
-end
-
-%% Check Output
-if any(isnan(waveforms), 'all')
-    warning(['NaN value(s) found in output waveforms; an unexpected' ...
-        ' error has occured.'])
-end
-
-%% Format Outputs
-switch nargout
-    case 2
-        varargout = {timeArray};
-    case 3
-        varargout = {timeArray, parameters};
-    otherwise
-        varargout = {};
-end
 end
