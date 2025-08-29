@@ -36,8 +36,14 @@ function [waveforms, varargout] = createTIPulseTrainWaveforms( ...
 %   {sampRate=100e3} Defines the sampling rate for the waveforms in Hz.
 %
 %   createTIPulseTrainWaveforms(__, 'A1', amp1, 'A2', amp2) 
-%   {amp1=1, amp2=1} Sets the amplitude of the waveforms in arbitrairy 
-%   units.
+%   {amp1=1, amp2=1} Sets the amplitude of each waveform in arbitrairy 
+%   units. This value can be supplied as a scalar or, if numTrains > 1, 
+%   a vector of length numTrains where each value in the vector set's 
+%   the amplitude of the respective signal pulse train at that index.
+%       Scalar Example: 
+%           (..., 'A1', 1, 'A2', 2, ...)
+%       Vector Example:
+%           (..., 'NumTrains', 3, 'A1', [1, 3, 1], 'A2', [3, 1, 3], ...)
 %
 %   createTIPulseTrainWaveforms(__, 'ModulationSymetry', symetry)
 %   {symetry='signal1'} symetry determines if:
@@ -109,9 +115,9 @@ function [waveforms, varargout] = createTIPulseTrainWaveforms( ...
 %   See also CREATETISTIMWAVEFORMS, UTILS.GENERATEFMPHASEFCN, 
 %       UTILS.MODULATIONSYMETRY.
 
-% Corban Swain, January 2024
+% Corban Swain, August 2025
 
-VERSION = 'v0.3.2';
+VERSION = 'v0.4.0';
 
 %% Input Handling
 isNumericScalar = @(x) isnumeric(x) && isscalar(x);
@@ -121,6 +127,7 @@ isNonNegativeScalar = @(x) isNumericScalar(x) && (x >= 0);
 isLogicalScalar = @(x) islogical(x) && isscalar(x);
 isNonNegativeVecWithLen = @(x, lengths) isnumeric(x) && (all(x >=0)) ...
     && isvector(x) && any(length(x) == lengths, 'all');
+isNonNegativeVector = @(x) isnumeric(x) && (all(x >=0)) && isvector(x);
 
 p = inputParser();
 PULSE_DUR_KEY = 'PulseDuration';
@@ -143,9 +150,9 @@ p.addParameter(ITI_KEY, 1, isNonNegativeScalar); % seconds
 SAMP_RATE_KEY = 'SamplingRate';
 p.addParameter(SAMP_RATE_KEY, 100e3, isPositiveScalar); % hertz
 A1_KEY = 'A1';
-p.addParameter(A1_KEY, 1, isNonNegativeScalar);
+p.addParameter(A1_KEY, 1, isNonNegativeVector);
 A2_KEY = 'A2';
-p.addParameter(A2_KEY, 1, isNonNegativeScalar);
+p.addParameter(A2_KEY, 1, isNonNegativeVector);
 MOD_SYM_KEY = 'ModulationSymetry';
 p.addParameter(MOD_SYM_KEY, 'signal1', ...
     @utils.ModulationSymetry.isMember);
@@ -235,7 +242,6 @@ doFlip = inputs.(DO_FLIP_KEY);
 waitT = inputs.WaitTime(:)' .* [1, 1];
 parameters.WaitTime = waitT;
 
-doBruteForce = inputs.(DO_BRUTE_FORCE_KEY);
 doControl = inputs.(DO_CONTROL_KEY);
 doPlot = inputs.(DO_PLOT_KEY);
 doDebug = inputs.(DO_DEBUG_KEY);
@@ -281,14 +287,31 @@ if fullPulseDuration > pulsePeriod
         pulseDuration, num2str(rampT), fullPulseDuration, pulsePeriod)
 end
 
+% issue error if amp1 or amp2 vectors have improper length; valid
+% values must have a length of 1 (scalar) or numTrains
+if ~any(length(amp1) == [1, numTrains])
+    error(['`%s` must be a scalar or a vector with length `%s` (%d);' ...
+        ' instead recieved a vector of length %d. Update the value of' ...
+        ' either `%s` or `%s` to fix.'], ...
+        A1_KEY, NUM_TRAIN_KEY, numTrains, length(amp1), A1_KEY, ...
+        NUM_TRAIN_KEY);
+end
+if ~any(length(amp2) == [1, numTrains])
+    error(['`%s` must be a scalar or a vector with length `%s` (%d);' ...
+        ' instead recieved a vector of length %d. Update the value of' ...
+        ' either `%s` or `%s` to fix.'], ...
+        A2_KEY, NUM_TRAIN_KEY, numTrains, length(amp2), A2_KEY, ...
+        NUM_TRAIN_KEY);
+end
+
 maxRecommendCarrierFreq = (sampRate / 2.3) - interferenceBeatFreq;
 if carrierFreq > maxRecommendCarrierFreq
     warning(['With the given parameter configuration, the maximum' ...
-        ' recommended carrier frequency is %.3f Hz. However %.3f was' ...
+        ' recommended carrier frequency is %.3f Hz. However %.3f Hz was'...
         ' passed for the carrier frequency. Consider decreasing the' ...
         ' carrier frequency, increasing the sampling rate, or' ...
         ' decreasing the interference beat frequency.'], ...
-        maxRecommendCarrierFreq);
+        maxRecommendCarrierFreq, carrierFreq);
 end
 
 %% Computed Values
@@ -323,6 +346,11 @@ stimTimeSteps(end) = stimTimeSteps(end) - (breakT / 2) + modT;
 refFreqSteps = [repmat([breakCarrierFreq, carrierFreq], ...
     [1, pulsesPerTrain]), breakCarrierFreq];   
 pulseSel = 2:2:numStepsPerTrain;
+
+% get amp1 and amp2 into a consistent format: a row vector with length
+% numTrains
+amp1 = ones([1, numTrains]) .* amp1(:)';
+amp2 = ones([1, numTrains]) .* amp2(:)';
 
 if ~doControl
     %% Define Frequency Modulation Steps
@@ -471,7 +499,6 @@ for iSignal = 1:numSignals
     waveforms(stimSelection, iSignal) = ...
         sin(phaseforms(:, iSignal)) .* ampFcn(stimTimeArray); 
 end
-waveforms = waveforms .* [amp1, amp2];
 
 %% Generate Sequential Pulse Trains
 numInterTrainIntervals = numTrains - 1;
@@ -489,14 +516,49 @@ if numInterTrainIntervals > 0
         [numInterTrainIntervals, 1]), ...
         phaseforms);
 
-    waveforms = cat(1, ...
-        repmat(cat(1, waveforms, interTrainMatrix), ...
-        [numInterTrainIntervals, 1]), ...
-        waveforms);
+    % create the final waveforms matrix folded with size
+    % [numSamples, numSignals, numTrains]
+    waveforms = repmat(waveforms, [1, 1, numTrains]);
+    
+    % create a matrix of the amplitudes with size 
+    % [1, numSignals, numTrains]
+    ampMatrix = cat(1, amp1, amp2); % original vectors are row vectors
+    ampMatrix = permute(ampMatrix, [3, 1, 2]);
+    
+    % use element wise multiplication to scale waveforms to the amplitude
+    waveforms = waveforms .* ampMatrix;
+
+    if interTrainIntervalLength > 0
+        % create the interval matrix folded with size
+        % [interTrainIntervalLength, numSignals, numTrains]. There will be 
+        % one extra interval at the end which we will remove later.
+        allIntervalMatrix = repmat(interTrainMatrix, [1, 1, numTrains]);
+    
+        % update all train matrix by concatenating the intervals along the 
+        % sample/time dimension (1)
+        waveforms = cat(1, waveforms, allIntervalMatrix);
+    end
+
+    % reshape the 3D train matrix into a 2D waveform matrix by unfolding 
+    % the train dimension (3)
+    waveforms = permute(waveforms, [1, 3, 2]);
+    waveforms = reshape(waveforms, [], numSignals);
+
+    % drop the extra interval at the end, if needed
+    if interTrainIntervalLength > 0
+        startTrimIndex = size(waveforms, 1) + 1 ...
+            - interTrainIntervalLength;
+        waveforms(startTrimIndex:end, :) = [];
+    end
 
     numSamples = size(waveforms, 1);
     timeArray = colon(0, (numSamples - 1))' * sampPeriod;
     stimTimeArray = timeArray;
+else
+    % In the case where there is only one train (numInterTrainIntervals 
+    % is 0) we can know amp1 and amp2 are scalars and apply them to the two
+    % columns of waveforms, respectively.
+    waveforms = waveforms .* [amp1, amp2];
 end
 
 %% Add Wait Before and After Stimulus
@@ -635,7 +697,10 @@ if doPlot
     hold(ax1, 'on');
     plot(timeArray, waveforms(:, 1), plotArgs{:}, 'Color', s1Color);
     ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp1) * 1.1);
+    referenceAmp = max(cat(1, amp1, amp2), [], 'all');
+    referenceYLim = (...
+        [-1, 1] * utils.getScaleFactorFromAmp(referenceAmp) * 1.1);
+    ylim(referenceYLim);
     xlim([timeArray(1), timeArray(end)]);
     box('off');
     grid('on');
@@ -649,7 +714,7 @@ if doPlot
     hold(ax2, 'on');
     plot(timeArray, waveforms(:, 2), plotArgs{:}, 'Color', s2Color);
     ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp2) * 1.1);
+    ylim(referenceYLim);
     xlim([timeArray(1), timeArray(end)]);
     box('off');
     grid('on');
@@ -667,7 +732,8 @@ if doPlot
     hold(ax3, 'on');
     plot(timeArray, compWaveform, plotArgs{:}, 'Color', sumColor);
     ylabel('Amplitude (a.u.)');
-    ylim([-1, 1] * utils.getScaleFactorFromAmp(amp1 + amp2) * 1.1);
+    maxSummedAmp = max(amp1 + amp2, [], 'all');
+    ylim([-1, 1] * utils.getScaleFactorFromAmp(maxSummedAmp) * 1.1);
     xlim([timeArray(1), timeArray(end)]);
     box('off');
     grid('on');
@@ -738,8 +804,15 @@ if doPlot
         % str = strrep(str, '{', '\{');
         % str = strrep(str, '}', '\}');
     end
+
+    if verLessThan('matlab', '25.1')
+        datetext = datestr(now());
+    else
+        datetext = datetime('now');
+    end
+    
     str = sprintf('%s (Generated on %s, Version %s)', str, ...
-        datestr(now()), VERSION);
+        datetext, VERSION);
     curPos = f.Position;
     newW = curPos(3) * 1.2;
     newH = curPos(4) * 2.2;
